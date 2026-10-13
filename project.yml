@@ -1,0 +1,66 @@
+# XcodeGen description of the app: the build machine turns it into Kimi.xcodeproj (no Mac needed locally).
+name: Kimi
+options:
+  bundleIdPrefix: games.kim
+  deploymentTarget:
+    iOS: "15.0"          # iPhone 7 tops out at iOS 15
+  developmentLanguage: ru
+targets:
+  Kimi:
+    type: application
+    platform: iOS
+    sources: [Kimi, Shared]
+    dependencies:
+      - target: KimiWidget   # embedded as PlugIns/KimiWidget.appex; iOS 15 ignores it
+    scheme: {}
+    info:
+      path: Kimi/Info.plist
+      properties:
+        CFBundleDisplayName: Kimy
+        # Siri hears the Latin name in Russian as «Кими»: let it match that spelling too
+        INAlternativeAppNames:
+          - INAlternativeAppName: Кими
+        CFBundleDevelopmentRegion: ru
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSMicrophoneUsageDescription: Kimy слушает ваш вопрос, пока вы держите микрофон включённым.
+        NSSpeechRecognitionUsageDescription: Речь превращается в текст на iPhone, чтобы Kimy понял вопрос.
+        ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi
+        MARKETING_VERSION: "0.2"   # the widget's version must match
+        CURRENT_PROJECT_VERSION: "2"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # AppIntents (Siri) and ActivityKit (Dynamic Island) exist only from iOS 16:
+        # weak linking keeps the app starting on iOS 15 (iPhone 7)
+        OTHER_LDFLAGS: ["-weak_framework", "AppIntents", "-weak_framework", "ActivityKit"]
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+  KimiWidget:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.1"   # Live Activities start at iOS 16.1
+    sources: [KimiWidget, Shared]
+    info:
+      path: KimiWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Kimy
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi.widget
+        MARKETING_VERSION: "0.2"
+        CURRENT_PROJECT_VERSION: "2"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
