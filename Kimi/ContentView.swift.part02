@@ -1,0 +1,49 @@
+        .onChange(of: scenePhase) { if $0 == .active { Island.shared.refresh(phase) } }
+    }
+
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(chat.messages) { message in
+                        Bubble(message: message).id(message.id)
+                    }
+                    if chat.busy {
+                        ProgressView().padding(.leading, 12).id("busy")
+                    }
+                }
+                .padding(12)
+            }
+            .onChange(of: chat.messages.count) { _ in
+                withAnimation { proxy.scrollTo(chat.messages.last?.id, anchor: .bottom) }
+            }
+        }
+    }
+
+    private var inputBar: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Button {
+                voice.toggle { text in Task { await ask(text, voice: true) } }
+            } label: {
+                Image(systemName: voice.listening ? "stop.circle.fill" : "mic.circle")
+                    .font(.system(size: 32))
+                    .foregroundColor(voice.listening ? .red : .accentColor)
+            }
+            .accessibilityLabel(voice.listening ? "Закончить" : "Спросить голосом")
+            .disabled(chat.busy)
+
+            TextField("Сообщение", text: $draft)
+                .textFieldStyle(.roundedBorder)
+                .submitLabel(.send)
+                .onSubmit { send() }
+
+            Button(action: send) {
+                Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+            }
+            .accessibilityLabel("Отправить")
+            .disabled(chat.busy || draft.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground))
+    }
+
