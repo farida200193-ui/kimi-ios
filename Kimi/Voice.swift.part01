@@ -1,0 +1,47 @@
+import AVFoundation
+import Speech
+
+/// Push-to-talk: tap the microphone, speak, tap again (or pause) and the text is delivered once.
+/// Recognition runs on the iPhone's own speech service; Kimi stops listening while it speaks.
+@MainActor
+final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
+    @Published private(set) var listening = false
+    @Published private(set) var heard = ""
+    @Published private(set) var note: String?   // why listening could not start
+    @Published private(set) var speaking = false
+
+    private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
+    private let engine = AVAudioEngine()
+    private let synthesizer = AVSpeechSynthesizer()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var task: SFSpeechRecognitionTask?
+    private var onText: ((String) -> Void)?
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
+
+    func toggle(onText: @escaping (String) -> Void) {
+        if listening { finish() } else { Task { await start(onText: onText) } }
+    }
+
+    private func start(onText: @escaping (String) -> Void) async {
+        guard await Self.permitted() else {
+            note = "Нет доступа к микрофону или распознаванию речи: разрешите их в Настройках → Kimy."
+            return
+        }
+        guard let recognizer, recognizer.isAvailable else {
+            note = "Распознавание речи сейчас недоступно."
+            return
+        }
+        synthesizer.stopSpeaking(at: .immediate)
+        self.onText = onText
+        heard = ""
+        note = nil
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker, .duckOthers])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let request = SFSpeechAudioBufferRecognitionRequest()
+            request.shouldReportPartialResults = true
