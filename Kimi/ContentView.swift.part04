@@ -1,0 +1,25 @@
+                    TextField(KimiCore.defaultModel, text: $model)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                }
+                if #available(iOS 16.0, *) {
+                    Section("Siri") {
+                        Text("Скажите: «Привет, Siri, спроси Кими» — Siri спросит, что передать.")
+                    }
+                }
+            }
+            .navigationTitle("Настройки")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Сохранить") {
+                        Keychain.save(key)
+                        Settings.model = model
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
