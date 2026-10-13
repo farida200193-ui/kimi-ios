@@ -1,0 +1,47 @@
+# Builds an unsigned Kimi.ipa on GitHub's Mac. Sideloadly signs it with the owner's Apple ID on install.
+name: build
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # big files were uploaded through the web editor in pieces: glue them back
+      - name: Join split files
+        run: |
+          for p in $(find . -name '*.part01'); do b="${p%.part01}"; cat "$b".part[0-9][0-9] > "$b"; rm "$b".part[0-9][0-9]; done
+
+      - name: Core self-test
+        run: swiftc -o /tmp/coretest Kimi/KimiCore.swift Tests/main.swift && /tmp/coretest
+
+      - name: Draw Kimy (app icon, Dynamic Island images)
+        run: python3 -m pip install --quiet --break-system-packages pillow && python3 tools/kimy.py
+
+      - name: Generate the Xcode project
+        run: brew install xcodegen && xcodegen generate
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          xcodebuild -project Kimi.xcodeproj -scheme Kimi -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+          test -d build/Build/Products/Release-iphoneos/Kimi.app
+          test -d build/Build/Products/Release-iphoneos/Kimi.app/PlugIns/KimiWidget.appex   # the Dynamic Island
+
+      - name: Package Kimi.ipa
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Kimi.app Payload/
+          zip -qry Kimi.ipa Payload
+          ls -lh Kimi.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kimi-ipa
+          path: Kimi.ipa
+          retention-days: 30
