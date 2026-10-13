@@ -1,0 +1,51 @@
+    private func send() {
+        let text = draft
+        draft = ""
+        Task {
+            // a failed question goes back into the field so it can be retried
+            if await chat.send(text, voice: false) == nil, draft.isEmpty { draft = text }
+        }
+    }
+
+    private func ask(_ text: String, voice spoken: Bool) async {
+        if let answer = await chat.send(text, voice: spoken), spoken { voice.say(answer) }
+    }
+}
+
+private struct Bubble: View {
+    let message: ChatMessage
+    private var mine: Bool { message.role == .user }
+
+    var body: some View {
+        HStack {
+            if mine { Spacer(minLength: 40) }
+            Text(message.text)
+                .textSelection(.enabled)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(mine ? Color.accentColor : Color(.secondarySystemBackground))
+                .foregroundColor(mine ? .white : .primary)
+                .cornerRadius(16)
+            if !mine { Spacer(minLength: 40) }
+        }
+    }
+}
+
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var key = Keychain.read()
+    @State private var model = Settings.model
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section {
+                    SecureField("Ключ AI Gateway (sk-…)", text: $key)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                } header: {
+                    Text("Ключ")
+                } footer: {
+                    Text("Хранится в защищённой Связке ключей этого iPhone и отправляется только в AI Gateway Timeweb.")
+                }
+                Section("Модель") {
