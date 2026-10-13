@@ -14,7 +14,8 @@ jobs:
       # big files were uploaded through the web editor in pieces: glue them back
       - name: Join split files
         run: |
-          for p in $(find . -name '*.part01'); do b="${p%.part01}"; cat "$b".part[0-9][0-9] > "$b"; rm "$b".part[0-9][0-9]; done
+          # a whole file uploaded later wins over its old pieces
+          for p in $(find . -name '*.part01'); do b="${p%.part01}"; [ -f "$b" ] || cat "$b".part[0-9][0-9] > "$b"; rm "$b".part[0-9][0-9]; done
 
       - name: Core self-test
         run: swiftc -o /tmp/coretest Kimi/KimiCore.swift Tests/main.swift && /tmp/coretest

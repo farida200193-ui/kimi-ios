@@ -1,0 +1,398 @@
+import SwiftUI
+
+/// Home and chat in one screen (approved design: «Главная» and «Чат»): Kimy greets on an empty chat,
+/// the conversation replaces the greeting, the glass input bar stays at the bottom.
+struct ContentView: View {
+    @StateObject private var chat = ChatModel()
+    @StateObject private var voice = Voice()
+    @State private var draft = ""
+    @State private var showSettings = Keychain.read().isEmpty
+    @State private var showOffice = false
+    @State private var pending = 0
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var phase: KimiPhase {
+        voice.listening ? .listening : chat.busy ? .thinking : voice.speaking ? .speaking : .idle
+    }
+
+    var body: some View {
+        ZStack {
+            NightBackground()
+            VStack(spacing: 12) {
+                header
+                if chat.messages.isEmpty && !chat.busy {
+                    home
+                } else {
+                    messageList
+                }
+                notes
+                inputBar
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+        .foregroundColor(Theme.text)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showSettings) { SettingsView() }
+        .background(EmptyView().sheet(isPresented: $showOffice, onDismiss: { Task { await loadPending() } }) { OfficeView(voice: voice) })
+        .task { await loadPending() }
+        // Kimy stays in the Dynamic Island / on the lock screen after the app is minimised
+        .onAppear { Island.shared.refresh(phase) }
+        .onChange(of: phase) { Island.shared.show($0) }
+        .onChange(of: scenePhase) {
+            if $0 == .active { Island.shared.refresh(phase); Task { await loadPending() } }
+        }
+    }
+
+    // MARK: header — menu, Kimy pill, Office pill with the number of decisions waiting
+
+    private var header: some View {
+        HStack {
+            circleButton("line.3.horizontal", label: "Настройки") { showSettings = true }
+            Spacer()
+            HStack(spacing: 8) {
+                GhostBadge(size: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Kimy").font(Theme.title(15))
+                    Text(voice.listening ? "слушает" : chat.busy ? "думает…" : voice.speaking ? "говорит" : "на связи")
+                        .font(.system(size: 11)).foregroundColor(Theme.mint)
+                }
+            }
+            .padding(.leading, 6).padding(.trailing, 14).padding(.vertical, 6)
+            .background(Color.white.opacity(0.06), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.08)))
+            Spacer()
+            Button { showOffice = true } label: {
+                HStack(spacing: 8) {
+                    Text("Офис").font(Theme.title(14))
+                    if pending > 0 { counter(pending) }
+                }
+                .padding(.horizontal, 14).frame(height: 44)
+                .background(Theme.violet.opacity(0.18), in: Capsule())
+                .overlay(Capsule().stroke(Color(red: 0.227, green: 0.196, blue: 0.439)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(pending > 0 ? "Офис, ждут решения: \(pending)" : "Офис")
+        }
+        .padding(.top, 4)
+    }
+
+    private func circleButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 18, weight: .medium))
+                .frame(width: 44, height: 44)
+                .background(Color.white.opacity(0.05), in: Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func counter(_ n: Int) -> some View {
+        Text("\(n)").font(.system(size: 11, weight: .semibold)).foregroundColor(.white)
+            .frame(minWidth: 18, minHeight: 18).padding(.horizontal, 3)
+            .background(Theme.orange, in: Capsule())
+    }
+
+    // MARK: home — Kimy, greeting, Office card, quick questions
+
+    private var home: some View {
+        VStack(spacing: 14) {
+            Spacer(minLength: 0)
+            KimyHero(size: 112, listening: voice.listening)
+            VStack(spacing: 6) {
+                Text(Settings.name.isEmpty ? "Привет!" : "Привет, \(Settings.name)").font(Theme.title(26, .medium))
+                Text("Чем займёмся?").font(Theme.title(26, .heavy)).foregroundColor(Theme.sky)
+            }
+            .multilineTextAlignment(.center)
+            Text("Нажмите на голос или напишите").font(.system(size: 14)).foregroundColor(Theme.muted)
+            Spacer(minLength: 0)
+
+            Button { showOffice = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "building.2").font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                        .frame(width: 40, height: 40).background(Theme.violet, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Офис").font(Theme.title(16))
+                        Text(pending > 0 ? "16 сотрудников · \(pending) ждёт решения" : "16 сотрудников").font(.system(size: 13)).foregroundColor(Theme.soft)
+                    }
+                    Spacer()
+                    if pending > 0 { counter(pending) }
+                    Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(LinearGradient(colors: [Theme.violet.opacity(0.28), Theme.violet.opacity(0.08)], startPoint: .leading, endPoint: .trailing),
+                            in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color(red: 0.227, green: 0.196, blue: 0.439)))
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 10) {
+                quick("calendar", "Что у меня завтра?", tint: Theme.blue, fg: Theme.sky) { Task { await ask("Что у меня завтра?", voice: false) } }
+                quick("person.3", "Что в Офисе?", tint: Theme.green, fg: Theme.mint) { showOffice = true }
+            }
+        }
+    }
+
+    private func quick(_ icon: String, _ title: String, tint: Color, fg: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 14, weight: .semibold)).foregroundColor(fg)
+                    .frame(width: 30, height: 30).background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text(title).font(.system(size: 14)).multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(12).frame(maxWidth: .infinity, minHeight: 44)
+            .glass(18)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: chat
+
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(chat.messages) { message in
+                        Bubble(message: message).id(message.id)
+                    }
+                    if chat.busy { TypingDots().id("busy") }
+                }
+                .padding(.vertical, 8)
+            }
+            .onChange(of: chat.messages.count) { _ in
+                withAnimation {
+                    if chat.busy { proxy.scrollTo("busy", anchor: .bottom) } else if let id = chat.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var notes: some View {
+        if let error = chat.error {
+            Text(error).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
+        }
+        if voice.listening {
+            Text(voice.heard.isEmpty ? "Слушаю…" : voice.heard).font(.footnote).foregroundColor(Theme.soft)
+        } else if let note = voice.note {
+            Text(note).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
+        }
+        if !chat.messages.isEmpty && !chat.busy {
+            HStack(spacing: 8) {
+                chip("Новый чат") { chat.clear() }
+                chip("Что в Офисе?") { showOffice = true }
+                Spacer()
+            }
+        }
+    }
+
+    private func chip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13)).foregroundColor(Theme.soft).padding(.horizontal, 14).frame(height: 36).glass(18)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var inputBar: some View {
+        HStack(spacing: 8) {
+            TextField("", text: $draft, prompt: Text("Спросите Kimy…").foregroundColor(Theme.muted))
+                .font(.system(size: 16))
+                .submitLabel(.send)
+                .onSubmit { send() }
+                .padding(.leading, 14)
+            if draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                Button {
+                    voice.toggle { text in Task { await ask(text, voice: true) } }
+                } label: {
+                    Image(systemName: voice.listening ? "stop.fill" : "waveform")
+                        .font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(voice.listening ? Color.red : Theme.blue, in: Circle())
+                        .shadow(color: Theme.blue.opacity(0.55), radius: 12)
+                }
+                .accessibilityLabel(voice.listening ? "Закончить" : "Спросить голосом")
+                .disabled(chat.busy)
+            } else {
+                Button(action: send) {
+                    Image(systemName: "arrow.up").font(.system(size: 18, weight: .bold)).foregroundColor(.white)
+                        .frame(width: 44, height: 44).background(Theme.blue, in: Circle())
+                }
+                .accessibilityLabel("Отправить")
+                .disabled(chat.busy)
+            }
+        }
+        .padding(6)
+        .glass(26)
+    }
+
+    private func send() {
+        let text = draft
+        draft = ""
+        if KimiCore.opensOffice(text) { showOffice = true; return }
+        Task {
+            // a failed question goes back into the field so it can be retried
+            if await chat.send(text, voice: false) == nil, draft.isEmpty { draft = text }
+        }
+    }
+
+    private func ask(_ text: String, voice spoken: Bool) async {
+        if KimiCore.opensOffice(text) { showOffice = true; return }
+        if let answer = await chat.send(text, voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) }
+    }
+
+    private func loadPending() async {
+        guard !Keychain.read(Keychain.office).isEmpty else { return }
+        if let root = try? await callOffice({ try Office.request("proposals", token: $0) }) {
+            pending = Office.proposals(root).count
+        }
+    }
+}
+
+/// Bold, italics and links from the model's markdown; anything else shown as plain text.
+func markdown(_ text: String) -> AttributedString {
+    (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+}
+
+private struct Bubble: View {
+    let message: ChatMessage
+    private var mine: Bool { message.role == .user }
+
+    var body: some View {
+        HStack {
+            if mine { Spacer(minLength: 48) }
+            Group {
+                if mine {
+                    Text(message.text)
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .background(Theme.blue, in: BubbleShape(mine: true))
+                        .foregroundColor(.white)
+                } else {
+                    Text(markdown(message.text))
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .background(.ultraThinMaterial, in: BubbleShape(mine: false))
+                        .background(Color.white.opacity(0.06), in: BubbleShape(mine: false))
+                        .overlay(BubbleShape(mine: false).stroke(Color.white.opacity(0.12)))
+                }
+            }
+            .font(.system(size: 15))
+            .lineSpacing(3)
+            .textSelection(.enabled)
+            if !mine { Spacer(minLength: 48) }
+        }
+    }
+}
+
+/// Rounded bubble with a smaller corner at the speaker's side, as in the design.
+private struct BubbleShape: Shape {
+    let mine: Bool
+    func path(in r: CGRect) -> Path {
+        let big: CGFloat = 20, small: CGFloat = 6
+        let bl = mine ? big : small, br = mine ? small : big
+        var p = Path()
+        p.move(to: CGPoint(x: r.minX + big, y: r.minY))
+        p.addLine(to: CGPoint(x: r.maxX - big, y: r.minY))
+        p.addArc(center: CGPoint(x: r.maxX - big, y: r.minY + big), radius: big, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+        p.addLine(to: CGPoint(x: r.maxX, y: r.maxY - br))
+        p.addArc(center: CGPoint(x: r.maxX - br, y: r.maxY - br), radius: br, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
+        p.addLine(to: CGPoint(x: r.minX + bl, y: r.maxY))
+        p.addArc(center: CGPoint(x: r.minX + bl, y: r.maxY - bl), radius: bl, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
+        p.addLine(to: CGPoint(x: r.minX, y: r.minY + big))
+        p.addArc(center: CGPoint(x: r.minX + big, y: r.minY + big), radius: big, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// «Kimy печатает»: three hopping dots.
+private struct TypingDots: View {
+    @Environment(\.accessibilityReduceMotion) private var still
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: still)) { tl in
+            let t = tl.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 5) {
+                ForEach(0..<3) { i in
+                    let k = max(0, sin((t - Double(i) * 0.15) * 2 * .pi / 1.2))
+                    Circle().fill([Theme.text, Theme.muted, Color(red: 0.29, green: 0.31, blue: 0.44)][i])
+                        .frame(width: 7, height: 7)
+                        .offset(y: still ? 0 : -5 * k)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .glass(18)
+        }
+        .accessibilityLabel("Kimy печатает")
+    }
+}
+
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var key = Keychain.read()
+    @State private var officeKey = Keychain.read(Keychain.office)
+    @State private var speechKey = Keychain.read(Keychain.speechkit)
+    @State private var model = Settings.model
+    @State private var name = Settings.name
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section("Как к вам обращаться") {
+                    TextField("Имя", text: $name)
+                }
+                Section {
+                    SecureField("Ключ AI Gateway (sk-…)", text: $key)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                } header: {
+                    Text("Ключ")
+                } footer: {
+                    Text("Хранится в защищённой Связке ключей этого iPhone и отправляется только в AI Gateway Timeweb.")
+                }
+                Section {
+                    SecureField("Ключ входа в Офис", text: $officeKey)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                } header: {
+                    Text("Офис")
+                } footer: {
+                    Text("Тот же ключ, что в веб-версии Kimy (файл kimi-office.token на сервере). Хранится в Связке ключей.")
+                }
+                Section {
+                    SecureField("API-ключ Yandex SpeechKit", text: $speechKey)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                } header: {
+                    Text("Голоса")
+                } footer: {
+                    Text("Kimy говорит голосом Даши, у каждого сотрудника свой голос. Ключ: Yandex Cloud → сервисный аккаунт с ролью ai.speechkit-tts.user → API-ключ. Без ключа говорит голос iPhone.")
+                }
+                Section("Модель") {
+                    TextField(KimiCore.defaultModel, text: $model)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                }
+                if #available(iOS 16.0, *) {
+                    Section("Siri") {
+                        Text("Скажите: «Привет, Siri, спроси Кими» — Siri спросит, что передать.")
+                    }
+                }
+            }
+            .navigationTitle("Настройки")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Отмена") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Сохранить") {
+                        Keychain.save(key)
+                        Keychain.save(officeKey, as: Keychain.office)
+                        Keychain.save(speechKey, as: Keychain.speechkit)
+                        Settings.model = model
+                        Settings.name = name
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
