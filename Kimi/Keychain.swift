@@ -49,8 +49,8 @@ enum Settings {
 }
 
 /// One question to the model. Shared by the chat screen and Siri.
-func askKimi(history: [ChatMessage], voice: Bool) async throws -> String {
-    let request = try KimiCore.request(key: Keychain.read(), model: Settings.model, history: history, voice: voice)
+func askKimi(history: [ChatMessage], voice: Bool, context: String = "") async throws -> String {
+    let request = try KimiCore.request(key: Keychain.read(), model: Settings.model, history: history, voice: voice, context: context)
     let (data, response) = try await URLSession.shared.data(for: request)
     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(code) else { throw KimiCore.Failure.service(code, KimiCore.errorText(data)) }

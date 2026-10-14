@@ -6,6 +6,7 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     var id = UUID()
     let role: Role
     let text: String
+    var hidden: Bool? = nil   // action results for the model; not shown in the chat
 }
 
 /// Request building and reply parsing. Foundation only, so it is tested without a phone (Tests/main.swift).
@@ -17,7 +18,7 @@ enum KimiCore {
     static let system = "Тебя зовут Kimy (по-русски — Кими), ты личный ассистент. Отвечай кратко и по делу, на языке пользователя. "
         + "У владельца есть ИИ-офис с сотрудниками (директор, ассистент, маркетолог, юрист, бухгалтер, отчёты и почта и другие). "
         + "Поручения сотрудникам и решения по их предложениям — на экране «Офис»: кнопка с домиком вверху или фраза «открой офис». "
-        + "Сам ты в офис не пишешь и не притворяешься, что передал поручение."
+        + "Если коннектор «Офис» не подключён, сам ты в офис не пишешь и не притворяешься, что передал поручение."
     static let voiceHint = " Сейчас ответ будет зачитан вслух: говори коротко, живым языком, без списков и разметки."
 
     enum Failure: LocalizedError, Equatable {
@@ -39,8 +40,8 @@ enum KimiCore {
         Array(history.suffix(maxHistory).drop(while: { $0.role == .assistant }))
     }
 
-    static func requestBody(model: String, history: [ChatMessage], voice: Bool) throws -> Data {
-        var messages: [[String: String]] = [["role": "system", "content": system + (voice ? voiceHint : "")]]
+    static func requestBody(model: String, history: [ChatMessage], voice: Bool, context: String = "") throws -> Data {
+        var messages: [[String: String]] = [["role": "system", "content": system + context + (voice ? voiceHint : "")]]
         messages += recent(history).map { ["role": $0.role.rawValue, "content": $0.text] }
         return try JSONSerialization.data(withJSONObject: ["model": model, "messages": messages])
     }
@@ -70,14 +71,14 @@ enum KimiCore {
         let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return t == "офис" || ["открой офис", "открыть офис", "покажи офис", "зайди в офис", "открой мой офис"].contains(t)
     }
-    static func request(key: String, model: String, history: [ChatMessage], voice: Bool) throws -> URLRequest {
+    static func request(key: String, model: String, history: [ChatMessage], voice: Bool, context: String = "") throws -> URLRequest {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw Failure.noKey }
         var request = URLRequest(url: endpoint, timeoutInterval: 120)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try requestBody(model: model, history: history, voice: voice)
+        request.httpBody = try requestBody(model: model, history: history, voice: voice, context: context)
         return request
     }
 }

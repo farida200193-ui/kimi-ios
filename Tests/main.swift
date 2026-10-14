@@ -1,5 +1,5 @@
 // Self-check of KimiCore, run on the build machine before the app is built:
-//   swiftc -o /tmp/coretest Kimi/KimiCore.swift Tests/main.swift && /tmp/coretest
+//   swiftc -o /tmp/coretest Kimi/KimiCore.swift Kimi/Agent.swift Tests/main.swift && /tmp/coretest
 import Foundation
 
 var failures = 0
@@ -63,6 +63,62 @@ check((ttsBody["hints"] as! [[String: Any]]).count == 2, "no role sent for a voi
 check((try? SpeechKit.request("x", voice: SpeechKit.kimy, key: "")) == nil, "SpeechKit key required")
 let mp3 = "{\"result\":{\"audioChunk\":{\"data\":\"\(Data([1, 2]).base64EncodedString())\"}}}\n{\"result\":{\"audioChunk\":{\"data\":\"\(Data([3]).base64EncodedString())\"}}}\n"
 check(SpeechKit.audio(mp3.data(using: .utf8)!) == Data([1, 2, 3]), "audio chunks joined")
+
+// agent: prompt lists only what the owner allowed
+let utc = TimeZone(identifier: "Europe/Moscow")!
+let ctx0 = Agent.context(access: [:], mcp: [:], mcpAccess: [:], memory: [], now: Date(timeIntervalSince1970: 0), zone: utc)
+check(ctx0.contains("Подключённых приложений нет") && !ctx0.contains("calendar.list"), "no connectors, no tools")
+let ctx1 = Agent.context(access: ["calendar": .read, "messages": .act], mcp: ["notion": [Agent.RemoteTool(name: "search", about: "Поиск", args: ["query"], readOnly: true), Agent.RemoteTool(name: "create", about: "Создать", args: [], readOnly: false)]],
+                         mcpAccess: ["notion": .read], memory: ["Жена — Алия"], now: Date(timeIntervalSince1970: 0), zone: utc)
+check(ctx1.contains("calendar.list") && !ctx1.contains("calendar.add"), "read access hides acting tools")
+check(ctx1.contains("message.send") && ctx1.contains("1. Жена — Алия"), "act tools and memory in prompt")
+check(ctx1.contains("\"tool\":\"search\"") && !ctx1.contains("\"tool\":\"create\""), "MCP read-only tools only")
+check(ctx1.contains("1970-01-01 03:00"), "current time in the owner's zone")
+let body = messages(try! KimiCore.requestBody(model: "m", history: [ChatMessage(role: .user, text: "q")], voice: false, context: ctx1))
+check(body[0]["content"]!.contains("calendar.list"), "context goes into the system prompt")
+
+// agent: reply parsing
+let reply = "Смотрю календарь.\n[[ACTION {\"tool\":\"calendar.list\",\"args\":{\"from\":\"2026-10-15\",\"days\":2}}]]\n[[ЗАПОМНИ: Любит кофе без сахара]] [[ЗАБУДЬ: 2]]"
+let parsed = Agent.parse(reply)
+check(parsed.text == "Смотрю календарь.", "marks removed from the visible text: \(parsed.text)")
+check(parsed.actions == [Agent.Action(tool: "calendar.list", args: ["from": "2026-10-15", "days": "2"])], "action parsed")
+check(parsed.remember == ["Любит кофе без сахара"] && parsed.forget == [2], "memory marks")
+let mcpReply = Agent.parse("[[ACTION {\"tool\":\"mcp\",\"args\":{\"server\":\"notion\",\"tool\":\"search\",\"args\":{\"query\":\"план\"}}}]]")
+check(mcpReply.actions.first?.args["args"] == "{\"query\":\"план\"}" && mcpReply.text.isEmpty, "nested MCP args kept as JSON")
+check(Agent.parse("[[ACTION {broken]]").actions.isEmpty, "broken action ignored")
+
+// agent: who decides
+let acc: [String: Agent.Access] = ["calendar": .read, "reminders": .act]
+check(Agent.gate(Agent.Action(tool: "calendar.list", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) == .run, "reading runs by itself")
+if case .refuse = Agent.gate(Agent.Action(tool: "calendar.add", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) {} else { check(false, "read-only refuses acting") }
+check(Agent.gate(Agent.Action(tool: "reminders.add", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) == .ask, "acting always asks")
+if case .refuse = Agent.gate(Agent.Action(tool: "contacts.find", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) {} else { check(false, "off connector refused") }
+if case .refuse = Agent.gate(Agent.Action(tool: "rm.rf", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) {} else { check(false, "unknown tool refused") }
+let tools = ["notion": [Agent.RemoteTool(name: "search", about: "", args: [], readOnly: true), Agent.RemoteTool(name: "create", about: "", args: [], readOnly: false)]]
+check(Agent.gate(Agent.Action(tool: "mcp", args: ["server": "notion", "tool": "search"]), access: [:], mcp: tools, mcpAccess: ["notion": .read]) == .run, "MCP read")
+check(Agent.gate(Agent.Action(tool: "mcp", args: ["server": "notion", "tool": "create"]), access: [:], mcp: tools, mcpAccess: ["notion": .act]) == .ask, "MCP write asks")
+if case .refuse = Agent.gate(Agent.Action(tool: "mcp", args: ["server": "notion", "tool": "create"]), access: [:], mcp: tools, mcpAccess: ["notion": .read]) {} else { check(false, "MCP write refused on read") }
+
+// agent: links into the owner's apps
+check(Agent.messageURL(["app": "whatsapp", "to": "+7 (900) 111-22-33", "text": "Привет & пока"])?.absoluteString == "https://wa.me/79001112233?text=%D0%9F%D1%80%D0%B8%D0%B2%D0%B5%D1%82%20%26%20%D0%BF%D0%BE%D0%BA%D0%B0", "WhatsApp link")
+check(Agent.messageURL(["app": "telegram", "to": "@alina", "text": "hi"])?.absoluteString == "tg://resolve?domain=alina&text=hi", "Telegram by username")
+check(Agent.messageURL(["app": "sms", "to": "+7 900", "text": "a=b"])?.absoluteString == "sms:+7900&body=a%3Db", "SMS link")
+check(Agent.messageURL(["app": "mail", "to": "a@b.ru", "subject": "Тест", "text": "x"])?.absoluteString.hasPrefix("mailto:a@b.ru?subject=") == true, "mail link")
+check(Agent.messageURL(["app": "fax", "text": "x"]) == nil, "unknown messenger")
+check(Agent.shortcutURL("Свет в гостиной", input: nil)?.absoluteString == "shortcuts://run-shortcut?name=%D0%A1%D0%B2%D0%B5%D1%82%20%D0%B2%20%D0%B3%D0%BE%D1%81%D1%82%D0%B8%D0%BD%D0%BE%D0%B9", "shortcut link")
+check(Agent.shortcutURL(" ", input: nil) == nil, "empty shortcut name")
+check(Agent.date("2026-10-15 09:30", zone: utc) == Date(timeIntervalSince1970: 1_792_045_800), "date parsed in the owner's zone")
+check(Agent.date("завтра") == nil, "free text is not a date")
+
+// agent: MCP
+check((try? Agent.MCP.request(url: URL(string: "http://x.ru/mcp")!, token: "", session: nil, id: 1, method: "tools/list")) == nil, "MCP needs https")
+let mreq = try! Agent.MCP.request(url: URL(string: "https://mcp.notion.com/mcp")!, token: " t ", session: "s1", id: 2, method: "tools/list")
+check(mreq.value(forHTTPHeaderField: "Authorization") == "Bearer t" && mreq.value(forHTTPHeaderField: "Mcp-Session-Id") == "s1", "MCP headers")
+let sse = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"search\",\"description\":\"Find\",\"inputSchema\":{\"properties\":{\"query\":{},\"limit\":{}}},\"annotations\":{\"readOnlyHint\":true}},{\"name\":\"create\"}]}}\n\n"
+let listed = Agent.MCP.tools(try! Agent.MCP.result(Data(sse.utf8)))
+check(listed == [Agent.RemoteTool(name: "search", about: "Find", args: ["limit", "query"], readOnly: true), Agent.RemoteTool(name: "create", about: "", args: [], readOnly: false)], "MCP tools from an event stream")
+check(Agent.MCP.text(try! Agent.MCP.result(Data(#"{"result":{"content":[{"type":"text","text":"ok"}]}}"#.utf8))) == "ok", "MCP plain JSON result")
+check((try? Agent.MCP.result(Data(#"{"error":{"message":"нет доступа"}}"#.utf8))) == nil, "MCP error thrown")
 
 if failures > 0 { print("\(failures) check(s) failed"); exit(1) }
 print("KimiCore: all checks passed")

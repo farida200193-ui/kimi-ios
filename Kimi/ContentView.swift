@@ -8,7 +8,10 @@ struct ContentView: View {
     @State private var draft = ""
     @State private var showSettings = Keychain.read().isEmpty
     @State private var showOffice = false
+    @State private var showConnectors = false
+    @ObservedObject private var connectors = Connectors.shared
     @State private var pending = 0
+    @State private var spoken = false   // the last question was by voice: answer after an approval aloud too
     @Environment(\.scenePhase) private var scenePhase
 
     private var phase: KimiPhase {
@@ -20,7 +23,7 @@ struct ContentView: View {
             NightBackground()
             VStack(spacing: 12) {
                 header
-                if chat.messages.isEmpty && !chat.busy {
+                if chat.visible.isEmpty && !chat.busy && chat.pending == nil {
                     home
                 } else {
                     messageList
@@ -35,6 +38,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) { SettingsView() }
         .background(EmptyView().sheet(isPresented: $showOffice, onDismiss: { Task { await loadPending() } }) { OfficeView(voice: voice) })
+        .background(EmptyView().sheet(isPresented: $showConnectors) { ConnectorsView() })
         .task { await loadPending() }
         // Kimy stays in the Dynamic Island / on the lock screen after the app is minimised
         .onAppear { Island.shared.refresh(phase) }
@@ -127,6 +131,23 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
+            Button { showConnectors = true } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "square.grid.2x2").font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
+                        .frame(width: 40, height: 40).background(Theme.blue, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Коннекторы").font(Theme.title(16))
+                        Text(connectors.connectedCount == 0 ? "Календарь, сообщения, команды, сервисы" : "Подключено: \(connectors.connectedCount)")
+                            .font(.system(size: 13)).foregroundColor(Theme.soft)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .glass(20)
+            }
+            .buttonStyle(.plain)
+
             HStack(spacing: 10) {
                 quick("calendar", "Что у меня завтра?", tint: Theme.blue, fg: Theme.sky) { Task { await ask("Что у меня завтра?", voice: false) } }
                 quick("person.3", "Что в Офисе?", tint: Theme.green, fg: Theme.mint) { showOffice = true }
@@ -154,16 +175,21 @@ struct ContentView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(chat.messages) { message in
+                    ForEach(chat.visible) { message in
                         Bubble(message: message).id(message.id)
                     }
                     if chat.busy { TypingDots().id("busy") }
+                    if let action = chat.pending, !chat.busy {
+                        ApprovalCard(action: action, approve: { Task { await approve() } }, decline: { chat.decline() }).id("pending")
+                    }
                 }
                 .padding(.vertical, 8)
             }
             .onChange(of: chat.messages.count) { _ in
                 withAnimation {
-                    if chat.busy { proxy.scrollTo("busy", anchor: .bottom) } else if let id = chat.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+                    if chat.busy { proxy.scrollTo("busy", anchor: .bottom) }
+                    else if chat.pending != nil { proxy.scrollTo("pending", anchor: .bottom) }
+                    else if let id = chat.visible.last?.id { proxy.scrollTo(id, anchor: .bottom) }
                 }
             }
         }
@@ -178,10 +204,11 @@ struct ContentView: View {
         } else if let note = voice.note {
             Text(note).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
         }
-        if !chat.messages.isEmpty && !chat.busy {
+        if !chat.visible.isEmpty && !chat.busy {
             HStack(spacing: 8) {
                 chip("Новый чат") { chat.clear() }
-                chip("Что в Офисе?") { showOffice = true }
+                chip("Коннекторы") { showConnectors = true }
+                chip("Офис") { showOffice = true }
                 Spacer()
             }
         }
@@ -230,15 +257,21 @@ struct ContentView: View {
         let text = draft
         draft = ""
         if KimiCore.opensOffice(text) { showOffice = true; return }
+        spoken = false
         Task {
             // a failed question goes back into the field so it can be retried
             if await chat.send(text, voice: false) == nil, draft.isEmpty { draft = text }
         }
     }
 
-    private func ask(_ text: String, voice spoken: Bool) async {
+    private func ask(_ text: String, voice byVoice: Bool) async {
         if KimiCore.opensOffice(text) { showOffice = true; return }
-        if let answer = await chat.send(text, voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) }
+        spoken = byVoice
+        if let answer = await chat.send(text, voice: byVoice), byVoice { voice.say(answer, as: SpeechKit.kimy) }
+    }
+
+    private func approve() async {
+        if let answer = await chat.approve(voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) }
     }
 
     private func loadPending() async {
@@ -268,7 +301,7 @@ private struct Bubble: View {
                         .background(Theme.blue, in: BubbleShape(mine: true))
                         .foregroundColor(.white)
                 } else {
-                    Text(markdown(message.text))
+                    Text(markdown(Agent.clean(message.text)))
                         .padding(.horizontal, 15).padding(.vertical, 11)
                         .background(.ultraThinMaterial, in: BubbleShape(mine: false))
                         .background(Color.white.opacity(0.06), in: BubbleShape(mine: false))
@@ -365,6 +398,11 @@ struct SettingsView: View {
                     Text("Голоса")
                 } footer: {
                     Text("Kimy говорит голосом Даши, у каждого сотрудника свой голос. Ключ: Yandex Cloud → сервисный аккаунт с ролью ai.speechkit-tts.user → API-ключ. Без ключа говорит голос iPhone.")
+                }
+                Section {
+                    NavigationLink(destination: ConnectorsView().navigationBarHidden(true)) { Text("Коннекторы, память и журнал") }
+                } footer: {
+                    Text("Какие приложения Kimy может читать и где действовать — только после вашего «Выполнить».")
                 }
                 Section("Модель") {
                     TextField(KimiCore.defaultModel, text: $model)
