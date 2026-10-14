@@ -11,6 +11,9 @@ struct ContentView: View {
     @State private var showConnectors = false
     @ObservedObject private var connectors = Connectors.shared
     @State private var pending = 0
+    @State private var attached: [(name: String, text: String)] = []
+    @State private var picking = false
+    @State private var report: SharedFile?
     @State private var spoken = false   // the last question was by voice: answer after an approval aloud too
     @Environment(\.scenePhase) private var scenePhase
 
@@ -39,6 +42,7 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .background(EmptyView().sheet(isPresented: $showOffice, onDismiss: { Task { await loadPending() } }) { OfficeView(voice: voice) })
         .background(EmptyView().sheet(isPresented: $showConnectors) { ConnectorsView() })
+        .background(EmptyView().sheet(item: $report) { ShareSheet(items: [$0.url]) })
         .task { await loadPending() }
         // Kimy stays in the Dynamic Island / on the lock screen after the app is minimised
         .onAppear { Island.shared.refresh(phase) }
@@ -176,7 +180,10 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(chat.visible) { message in
-                        Bubble(message: message).id(message.id)
+                        Bubble(message: message) { text in
+                            if let url = Files.report(text) { report = SharedFile(url: url) } else { chat.error = "Не удалось сохранить PDF." }
+                        }
+                        .id(message.id)
                     }
                     if chat.busy { TypingDots().id("busy") }
                     if let action = chat.pending, !chat.busy {
@@ -222,13 +229,42 @@ struct ContentView: View {
     }
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            if !attached.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Array(attached.enumerated()), id: \.offset) { i, f in
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.text").font(.system(size: 12))
+                                Text(f.name).font(.system(size: 12)).lineLimit(1)
+                                Button { attached.remove(at: i) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).frame(width: 24, height: 24) }
+                                    .buttonStyle(.plain).accessibilityLabel("Убрать \(f.name)")
+                            }
+                            .padding(.leading, 10).frame(height: 30).background(Theme.blue.opacity(0.2), in: Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 6).padding(.top, 4)
+                }
+            }
+            HStack(spacing: 4) {
+            Button { picking = true } label: {
+                Image(systemName: "paperclip").font(.system(size: 18, weight: .medium)).frame(width: 40, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Прикрепить файл")
+            .disabled(chat.busy)
+            .fileImporter(isPresented: $picking, allowedContentTypes: Files.types, allowsMultipleSelection: true) { result in
+                do {
+                    for url in try result.get() { attached.append(try Files.read(url)) }
+                } catch {
+                    chat.error = error.localizedDescription
+                }
+            }
             TextField("", text: $draft, prompt: Text("Спросите Kimy…").foregroundColor(Theme.muted))
                 .font(.system(size: 16))
                 .submitLabel(.send)
                 .onSubmit { send() }
-                .padding(.leading, 14)
-            if draft.trimmingCharacters(in: .whitespaces).isEmpty {
+            if draft.trimmingCharacters(in: .whitespaces).isEmpty && attached.isEmpty {
                 Button {
                     voice.toggle { text in Task { await ask(text, voice: true) } }
                 } label: {
@@ -248,26 +284,33 @@ struct ContentView: View {
                 .accessibilityLabel("Отправить")
                 .disabled(chat.busy)
             }
+            }
         }
         .padding(6)
         .glass(26)
     }
 
     private func send() {
-        let text = draft
+        let text = draft, files = attached
         draft = ""
-        if KimiCore.opensOffice(text) { showOffice = true; return }
+        attached = []
+        if files.isEmpty && KimiCore.opensOffice(text) { showOffice = true; return }
         spoken = false
         Task {
             // a failed question goes back into the field so it can be retried
-            if await chat.send(text, voice: false) == nil, draft.isEmpty { draft = text }
+            if await chat.send(text, voice: false, files: files) == nil {
+                if draft.isEmpty { draft = text }
+                if attached.isEmpty { attached = files }
+            }
         }
     }
 
     private func ask(_ text: String, voice byVoice: Bool) async {
         if KimiCore.opensOffice(text) { showOffice = true; return }
         spoken = byVoice
-        if let answer = await chat.send(text, voice: byVoice), byVoice { voice.say(answer, as: SpeechKit.kimy) }
+        let files = attached
+        attached = []
+        if let answer = await chat.send(text, voice: byVoice, files: files), byVoice { voice.say(answer, as: SpeechKit.kimy) }
     }
 
     private func approve() async {
@@ -287,8 +330,14 @@ func markdown(_ text: String) -> AttributedString {
     (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
 }
 
+struct SharedFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 private struct Bubble: View {
     let message: ChatMessage
+    let report: (String) -> Void
     private var mine: Bool { message.role == .user }
 
     var body: some View {
@@ -296,7 +345,7 @@ private struct Bubble: View {
             if mine { Spacer(minLength: 48) }
             Group {
                 if mine {
-                    Text(message.text)
+                    Text(([message.text] + (message.files ?? []).map { "📎 " + $0 }).joined(separator: "\n"))
                         .padding(.horizontal, 15).padding(.vertical, 11)
                         .background(Theme.blue, in: BubbleShape(mine: true))
                         .foregroundColor(.white)
@@ -306,11 +355,14 @@ private struct Bubble: View {
                         .background(.ultraThinMaterial, in: BubbleShape(mine: false))
                         .background(Color.white.opacity(0.06), in: BubbleShape(mine: false))
                         .overlay(BubbleShape(mine: false).stroke(Color.white.opacity(0.12)))
+                        .contextMenu {
+                            Button { UIPasteboard.general.string = Agent.clean(message.text) } label: { Label("Скопировать", systemImage: "doc.on.doc") }
+                            Button { report(Agent.clean(message.text)) } label: { Label("Отчёт в PDF", systemImage: "doc.richtext") }
+                        }
                 }
             }
             .font(.system(size: 15))
-            .lineSpacing(3)
-            .textSelection(.enabled)
+            .lineSpacing(3)   // no text selection: a long press opens «Скопировать» / «Отчёт в PDF»
             if !mine { Spacer(minLength: 48) }
         }
     }

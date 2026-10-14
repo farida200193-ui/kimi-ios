@@ -7,6 +7,10 @@ struct ChatMessage: Codable, Identifiable, Equatable {
     let role: Role
     let text: String
     var hidden: Bool? = nil   // action results for the model; not shown in the chat
+    var files: [String]? = nil       // names of attached files, shown under the question
+    var attachment: String? = nil    // their text, sent to the model with the question
+
+    var forModel: String { attachment.map { $0 + "\n\n" + text } ?? text }
 }
 
 /// Request building and reply parsing. Foundation only, so it is tested without a phone (Tests/main.swift).
@@ -19,6 +23,20 @@ enum KimiCore {
         + "У владельца есть ИИ-офис с сотрудниками (директор, ассистент, маркетолог, юрист, бухгалтер, отчёты и почта и другие). "
         + "Поручения сотрудникам и решения по их предложениям — на экране «Офис»: кнопка с домиком вверху или фраза «открой офис». "
         + "Если коннектор «Офис» не подключён, сам ты в офис не пишешь и не притворяешься, что передал поручение."
+    // shortcut: a file is cut to this many characters, upgrade to chunking + summaries for big archives
+    static let maxFileText = 60_000
+    static let reportHint = "Вам прислали файлы — делайте выводы только по ним, цифры берите из файла. Если просят отчёт: заголовок, краткие итоги, ключевые цифры, выводы и рекомендации."
+
+    /// Attached files as one block the model reads before the question.
+    static func attachment(_ files: [(name: String, text: String)]) -> String? {
+        guard !files.isEmpty else { return nil }
+        let budget = maxFileText / files.count
+        return files.map { f in
+            let body = f.text.count > budget ? String(f.text.prefix(budget)) + "\n…[обрезано: файл длиннее \(budget) символов]" : f.text
+            return "Файл «\(f.name)»:\n<<<\n\(body)\n>>>"
+        }.joined(separator: "\n\n") + "\n" + reportHint
+    }
+
     static let voiceHint = " Сейчас ответ будет зачитан вслух: говори коротко, живым языком, без списков и разметки."
 
     enum Failure: LocalizedError, Equatable {
@@ -42,7 +60,7 @@ enum KimiCore {
 
     static func requestBody(model: String, history: [ChatMessage], voice: Bool, context: String = "") throws -> Data {
         var messages: [[String: String]] = [["role": "system", "content": system + context + (voice ? voiceHint : "")]]
-        messages += recent(history).map { ["role": $0.role.rawValue, "content": $0.text] }
+        messages += recent(history).map { ["role": $0.role.rawValue, "content": $0.forModel] }
         return try JSONSerialization.data(withJSONObject: ["model": model, "messages": messages])
     }
 

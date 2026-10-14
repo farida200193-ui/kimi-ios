@@ -25,11 +25,13 @@ final class ChatModel: ObservableObject {
     }
 
     /// Returns the answer so the caller can read it aloud, or nil on failure (the error is shown instead).
-    func send(_ text: String, voice: Bool) async -> String? {
-        let question = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    func send(_ text: String, voice: Bool, files: [(name: String, text: String)] = []) async -> String? {
+        var question = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if question.isEmpty && !files.isEmpty { question = "Сделай отчёт по файлу." }
         guard !question.isEmpty, !busy else { return nil }
         if pending != nil { decline() }
-        messages.append(ChatMessage(role: .user, text: question))
+        messages.append(ChatMessage(role: .user, text: question, files: files.isEmpty ? nil : files.map(\.name),
+                                    attachment: KimiCore.attachment(files)))
         return await work(voice: voice)
     }
 

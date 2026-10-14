@@ -22,6 +22,14 @@ check(sent.last?["content"] == "m29", "latest message kept")
 check(!(sent[0]["content"] ?? "").contains("вслух"), "no voice hint for typed questions")
 check((messages(try! KimiCore.requestBody(model: "m", history: [], voice: true))[0]["content"] ?? "").contains("вслух"), "voice hint")
 
+// attached files go to the model, not on screen
+let att = KimiCore.attachment([(name: "sales.csv", text: "день,сумма\n1,100")])!
+check(att.contains("Файл «sales.csv»") && att.contains("1,100"), "file text in the attachment")
+check(KimiCore.attachment([]) == nil, "no files, no attachment")
+check(KimiCore.attachment([(name: "big.txt", text: String(repeating: "я", count: 70_000))])!.contains("обрезано"), "big file cut")
+let withFile = messages(try! KimiCore.requestBody(model: "m", history: [ChatMessage(role: .user, text: "Сделай отчёт", files: ["sales.csv"], attachment: att)], voice: false))
+check(withFile[1]["content"]!.hasPrefix("Файл «sales.csv»") && withFile[1]["content"]!.hasSuffix("Сделай отчёт"), "attachment sent before the question")
+
 // replies
 let ok = #"{"choices":[{"message":{"content":"  привет \n"}}]}"#.data(using: .utf8)!
 check((try? KimiCore.parseReply(ok)) == "привет", "reply trimmed")
