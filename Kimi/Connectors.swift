@@ -38,6 +38,15 @@ final class Connectors: ObservableObject {
         mcpTools = load("mcpTools", from: defaults) ?? [:]
         memory = loadFile("memory.json") ?? []
         journal = loadFile("journal.json") ?? []
+        officeKeyChanged()
+    }
+
+    /// The Office is the owner's own server: with its key in place Kimy may ask it, unless the owner switched it off.
+    func officeKeyChanged() {
+        let hasKey = !Keychain.read(Keychain.office).isEmpty
+        if hasKey && access["office"] == nil { access["office"] = .read }
+        if !hasKey && access["office"] != nil { access["office"] = nil }
+        store(access, "access")
     }
 
     var mcpAccess: [String: Agent.Access] {
@@ -206,6 +215,10 @@ final class Connectors: ObservableObject {
             let root = try await callOffice { try Office.ask(x["text"] ?? "", token: $0) }
             let replies = Office.replies(root)
             return replies.isEmpty ? "Поручение передано, ответ придёт в Telegram-группу офиса." : replies.map { "\($0.who): \($0.text)" }.joined(separator: "\n\n")
+
+        case "office.proposals":
+            let list = Office.proposals(try await callOffice { try Office.request("proposals", token: $0) })
+            return list.isEmpty ? "Решений не ждёт ничего." : list.map { "№\($0.id): \($0.text)" }.joined(separator: "\n")
 
         case "mcp":
             guard let name = x["server"], let server = servers.first(where: { $0.name == name }), let tool = x["tool"] else {

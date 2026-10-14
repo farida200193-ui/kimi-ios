@@ -90,6 +90,7 @@ check(Agent.parse("[[ACTION {broken]]").actions.isEmpty, "broken action ignored"
 // agent: who decides
 let acc: [String: Agent.Access] = ["calendar": .read, "reminders": .act]
 check(Agent.gate(Agent.Action(tool: "calendar.list", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) == .run, "reading runs by itself")
+check(Agent.gate(Agent.Action(tool: "office.proposals", args: [:]), access: ["office": .read], mcp: [:], mcpAccess: [:]) == .run, "Kimy sees what waits in the Office")
 if case .refuse = Agent.gate(Agent.Action(tool: "calendar.add", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) {} else { check(false, "read-only refuses acting") }
 check(Agent.gate(Agent.Action(tool: "reminders.add", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) == .ask, "acting always asks")
 if case .refuse = Agent.gate(Agent.Action(tool: "contacts.find", args: [:]), access: acc, mcp: [:], mcpAccess: [:]) {} else { check(false, "off connector refused") }

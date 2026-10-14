@@ -423,6 +423,7 @@ struct SettingsView: View {
                     Button("Сохранить") {
                         Keychain.save(key)
                         Keychain.save(officeKey, as: Keychain.office)
+                        Connectors.shared.officeKeyChanged()
                         Keychain.save(speechKey, as: Keychain.speechkit)
                         Settings.model = model
                         Settings.name = name

@@ -39,7 +39,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi
         MARKETING_VERSION: "0.4"   # the widget's version must match
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -65,7 +65,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi.widget
         MARKETING_VERSION: "0.4"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         CODE_SIGNING_ALLOWED: "NO"

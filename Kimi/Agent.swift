@@ -47,6 +47,7 @@ enum Agent {
         ]),
         Connector(id: "office", title: "Офис", icon: "building.2", about: "Сотрудники-агенты, в том числе Лев (почта) и Вера (продажи)", tools: [
             Tool(name: "office.ask", args: #"{"text":"Имя сотрудника, поручение"}"#, about: "спросить сотрудника офиса, например «Лев, что в почте?»", acts: false),
+            Tool(name: "office.proposals", args: "{}", about: "предложения сотрудников, ждущие решения владельца (одобряет он сам на экране «Офис» кодовым словом)", acts: false),
         ]),
     ]
 
@@ -200,6 +201,7 @@ enum Agent {
         case "shortcut.run": return "Запустить команду «\(x["name"] ?? "")»"
         case "maps.route": return "Маршрут до «\(x["to"] ?? "")»"
         case "office.ask": return "Офис: «\(x["text"] ?? "")»"
+        case "office.proposals": return "Посмотреть, что ждёт решения в Офисе"
         case "mcp": return "\(x["server"] ?? "") → \(x["tool"] ?? "") \(x["args"] ?? "")"
         default: return a.tool
         }
