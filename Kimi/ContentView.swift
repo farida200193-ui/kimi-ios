@@ -116,7 +116,7 @@ struct ContentView: View {
                 Text("Чем займёмся?").font(Theme.title(26, .heavy)).foregroundColor(Theme.sky)
             }
             .multilineTextAlignment(.center)
-            Text("Нажмите на голос или напишите").font(.system(size: 14)).foregroundColor(Theme.muted)
+            Text("Нажмите 〰 и говорите — Kimy ответит голосом").font(.system(size: 14)).foregroundColor(Theme.muted)
             Spacer(minLength: 0)
 
             Button { showOffice = true } label: {
@@ -238,7 +238,7 @@ struct ContentView: View {
             Text(error).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
         }
         if voice.listening {
-            Text(voice.heard.isEmpty ? "Слушаю…" : voice.heard).font(.footnote).foregroundColor(Theme.soft)
+            Text(voice.heard.isEmpty ? (voice.conversation ? "Слушаю… скажите «стоп», чтобы закончить" : "Слушаю…") : voice.heard).font(.footnote).foregroundColor(Theme.soft)
         } else if let note = voice.note {
             Text(note).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
         }
@@ -298,15 +298,15 @@ struct ContentView: View {
                 .onSubmit { send() }
             if draft.trimmingCharacters(in: .whitespaces).isEmpty && attached.isEmpty {
                 Button {
-                    voice.toggle { text in Task { await ask(text, voice: true) } }
+                    voice.converse { text in Task { await heard(text) } }
                 } label: {
-                    Image(systemName: voice.listening ? "stop.fill" : "waveform")
+                    Image(systemName: voice.conversation || voice.listening ? "stop.fill" : "waveform")
                         .font(.system(size: 18, weight: .semibold)).foregroundColor(.white)
                         .frame(width: 44, height: 44)
-                        .background(voice.listening ? Color.red : Theme.blue, in: Circle())
+                        .background(voice.conversation || voice.listening ? Color.red : Theme.blue, in: Circle())
                         .shadow(color: Theme.blue.opacity(0.55), radius: 12)
                 }
-                .accessibilityLabel(voice.listening ? "Закончить" : "Спросить голосом")
+                .accessibilityLabel(voice.conversation ? "Закончить разговор" : "Поговорить голосом")
                 .disabled(chat.busy)
             } else {
                 Button(action: send) {
@@ -338,15 +338,25 @@ struct ContentView: View {
     }
 
     private func ask(_ text: String, voice byVoice: Bool) async {
-        if KimiCore.opensOffice(text) { showOffice = true; return }
+        if KimiCore.opensOffice(text) { voice.endConversation(); showOffice = true; return }
         spoken = byVoice
         let files = attached
         attached = []
-        if let answer = await chat.send(text, voice: byVoice, files: files), byVoice { voice.say(answer, as: SpeechKit.kimy) }
+        if let answer = await chat.send(text, voice: byVoice, files: files), byVoice { voice.say(answer, as: SpeechKit.kimy) } else { voice.listenAgain() }
+    }
+
+    /// One spoken phrase in the conversation: an answer to «Kimy хочет…» or a new question.
+    private func heard(_ text: String) async {
+        if chat.pending != nil, let yes = KimiCore.yesNo(text) {
+            spoken = true
+            if yes { await approve() } else { chat.decline(); voice.say("Хорошо, не делаю.", as: SpeechKit.kimy) }
+            return
+        }
+        await ask(text, voice: true)
     }
 
     private func approve() async {
-        if let answer = await chat.approve(voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) }
+        if let answer = await chat.approve(voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) } else { voice.listenAgain() }
     }
 
     private func refreshSteps() async {

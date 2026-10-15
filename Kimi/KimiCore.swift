@@ -84,6 +84,23 @@ enum KimiCore {
         return String(decoding: data.prefix(200), as: UTF8.self)
     }
 
+    private static func words(_ text: String) -> String {
+        text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+    }
+
+    /// «Стоп», «хватит», «пока» — the voice conversation ends.
+    static func endsConversation(_ text: String) -> Bool {
+        ["стоп", "хватит", "пока", "закончим", "конец", "всё спасибо", "все спасибо", "спасибо пока", "стоп стоп"].contains(words(text))
+    }
+
+    /// A spoken answer to «Kimy хочет…»: true — do it, false — don't, nil — something else was said.
+    static func yesNo(_ text: String) -> Bool? {
+        let t = words(text)
+        if ["да", "давай", "выполни", "выполняй", "делай", "подтверждаю", "да давай", "ок", "окей", "хорошо"].contains(t) { return true }
+        if ["нет", "не надо", "отмена", "отмени", "не делай", "нет не надо"].contains(t) { return false }
+        return nil
+    }
+
     /// «Открой офис», «покажи офис», «офис» — открывается экран офиса, вопрос в нейросеть не уходит.
     static func opensOffice(_ text: String) -> Bool {
         let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))

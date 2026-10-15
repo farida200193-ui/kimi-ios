@@ -1,14 +1,15 @@
 import AVFoundation
 import Speech
 
-/// Push-to-talk: tap the microphone, speak, tap again (or pause) and the text is delivered once.
-/// Recognition runs on the iPhone's own speech service; Kimi stops listening while it speaks.
+/// Voice conversation: tap once, talk; a pause ends the phrase, Kimy answers aloud and listens again.
+/// «Стоп», a tap or 8 seconds of silence end the conversation. Recognition runs on the iPhone; Kimy doesn't listen while it speaks.
 @MainActor
 final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDelegate {
     @Published private(set) var listening = false
     @Published private(set) var heard = ""
     @Published private(set) var note: String?   // why listening could not start
     @Published private(set) var speaking = false
+    @Published private(set) var conversation = false
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ru-RU"))
     private let engine = AVAudioEngine()
@@ -17,6 +18,10 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
     private var task: SFSpeechRecognitionTask?
     private var onText: ((String) -> Void)?
     private var player: AVAudioPlayer?
+    private var handler: ((String) -> Void)?    // kept for the next turn of the conversation
+    private var silence: Task<Void, Never>?
+    private static let pause: UInt64 = 1_400_000_000      // end of a phrase
+    private static let quiet: UInt64 = 8_000_000_000      // nobody speaks: the conversation ends
 
     override init() {
         super.init()
@@ -25,6 +30,41 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
 
     func toggle(onText: @escaping (String) -> Void) {
         if listening { finish() } else { Task { await start(onText: onText) } }
+    }
+
+    /// Starts the hands-free conversation, or ends it if it is on.
+    func converse(onText: @escaping (String) -> Void) {
+        if conversation || listening { endConversation(); return }
+        conversation = true
+        handler = onText
+        Task { await start(onText: onText) }
+    }
+
+    func endConversation() {
+        conversation = false
+        handler = nil
+        silence?.cancel()
+        if listening { listening = false; onText = nil; stopEngine() }
+        hush()
+    }
+
+    /// The next turn: after Kimy has spoken, or when there was nothing to say.
+    func listenAgain() {
+        guard conversation, !listening, !speaking, let handler = handler else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)   // let the speaker fall silent before the mic opens
+            if conversation, !listening, !speaking { await start(onText: handler) }
+        }
+    }
+
+    private func waitForSilence() {
+        silence?.cancel()
+        let heardSomething = !heard.isEmpty
+        silence = Task {
+            try? await Task.sleep(nanoseconds: heardSomething ? Self.pause : Self.quiet)
+            guard !Task.isCancelled, listening else { return }
+            if heardSomething { finish() } else if conversation { endConversation() } else { finish() }
+        }
     }
 
     private func start(onText: @escaping (String) -> Void) async {
@@ -57,11 +97,15 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
             task = recognizer.recognitionTask(with: request) { [weak self] result, error in
                 Task { @MainActor in
                     guard let self else { return }
-                    if let result { self.heard = result.bestTranscription.formattedString }
+                    if let result, result.bestTranscription.formattedString != self.heard {
+                        self.heard = result.bestTranscription.formattedString
+                        self.waitForSilence()
+                    }
                     if error != nil || result?.isFinal == true { self.finish() }
                 }
             }
             listening = true
+            waitForSilence()
         } catch {
             note = "Не удалось включить микрофон: \(error.localizedDescription)"
             stopEngine()
@@ -72,11 +116,13 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
     private func finish() {
         guard listening else { return }
         listening = false
+        silence?.cancel()
         stopEngine()
         let text = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         let deliver = onText
         onText = nil
-        if !text.isEmpty { deliver?(text) }
+        if conversation && KimiCore.endsConversation(text) { endConversation(); say("Хорошо, до связи!"); return }
+        if !text.isEmpty { deliver?(text) } else { listenAgain() }
     }
 
     private func stopEngine() {
@@ -125,7 +171,7 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
-        Task { @MainActor in self.speaking = false }
+        Task { @MainActor in self.speaking = false; self.listenAgain() }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
@@ -133,7 +179,10 @@ final class Voice: NSObject, ObservableObject, AVSpeechSynthesizerDelegate, AVAu
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.speaking = synthesizer.isSpeaking }
+        Task { @MainActor in
+            self.speaking = synthesizer.isSpeaking
+            if !self.speaking { self.listenAgain() }
+        }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {

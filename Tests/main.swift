@@ -149,5 +149,9 @@ check(Agent.gate(Agent.Action(tool: "calendar.series", args: [:]), access: ["cal
 check(Agent.describe(Agent.Action(tool: "calendar.series", args: ["title": "Силовая", "start": "2026-10-16 08:00", "days": "пн,ср,пт", "weeks": "4"])).contains("пн,ср,пт"), "series described")
 check(ctx0.contains("уровень подготовки"), "trainer skill always in the prompt")
 
+// voice conversation
+check(KimiCore.endsConversation("Стоп!") && KimiCore.endsConversation(" хватит ") && !KimiCore.endsConversation("стоп-кран это что"), "stop words")
+check(KimiCore.yesNo("Да.") == true && KimiCore.yesNo("Не надо") == false && KimiCore.yesNo("да, но в пятницу") == nil, "spoken approval")
+
 if failures > 0 { print("\(failures) check(s) failed"); exit(1) }
 print("KimiCore: all checks passed")
