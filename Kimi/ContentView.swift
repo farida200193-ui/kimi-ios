@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var showSettings = Keychain.read().isEmpty
     @State private var showOffice = false
     @State private var showConnectors = false
+    @State private var showIdea = false
     @ObservedObject private var connectors = Connectors.shared
     @State private var pending = 0
     @State private var attached: [(name: String, text: String)] = []
@@ -42,6 +43,7 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) { SettingsView() }
         .background(EmptyView().sheet(isPresented: $showOffice, onDismiss: { Task { await loadPending() } }) { OfficeView(voice: voice) })
         .background(EmptyView().sheet(isPresented: $showConnectors) { ConnectorsView() })
+        .background(EmptyView().fullScreenCover(isPresented: $showIdea) { IdeaView() })
         .background(EmptyView().sheet(item: $report) { ShareSheet(items: [$0.url]) })
         .task { await loadPending() }
         // Kimy stays in the Dynamic Island / on the lock screen after the app is minimised
@@ -154,7 +156,7 @@ struct ContentView: View {
 
             HStack(spacing: 10) {
                 quick("calendar", "Что у меня завтра?", tint: Theme.blue, fg: Theme.sky) { Task { await ask("Что у меня завтра?", voice: false) } }
-                quick("person.3", "Что в Офисе?", tint: Theme.green, fg: Theme.mint) { showOffice = true }
+                quick("lightbulb.fill", "Идея · прожарка идеи", tint: IdeaView.ember, fg: IdeaView.ember) { showIdea = true }
             }
         }
     }
@@ -216,6 +218,7 @@ struct ContentView: View {
                 chip("Новый чат") { chat.clear() }
                 chip("Коннекторы") { showConnectors = true }
                 chip("Офис") { showOffice = true }
+                chip("Идея") { showIdea = true }
                 Spacer()
             }
         }
