@@ -1,5 +1,5 @@
 // Self-check of KimiCore, run on the build machine before the app is built:
-//   swiftc -o /tmp/coretest Kimi/KimiCore.swift Kimi/Agent.swift Tests/main.swift && /tmp/coretest
+//   swiftc -o /tmp/coretest Kimi/KimiCore.swift Kimi/Agent.swift Kimi/Council.swift Tests/main.swift && /tmp/coretest
 import Foundation
 
 var failures = 0
@@ -128,6 +128,18 @@ let listed = Agent.MCP.tools(try! Agent.MCP.result(Data(sse.utf8)))
 check(listed == [Agent.RemoteTool(name: "search", about: "Find", args: ["limit", "query"], readOnly: true), Agent.RemoteTool(name: "create", about: "", args: [], readOnly: false)], "MCP tools from an event stream")
 check(Agent.MCP.text(try! Agent.MCP.result(Data(#"{"result":{"content":[{"type":"text","text":"ok"}]}}"#.utf8))) == "ok", "MCP plain JSON result")
 check((try? Agent.MCP.result(Data(#"{"error":{"message":"нет доступа"}}"#.utf8))) == nil, "MCP error thrown")
+
+// idea council
+check(Council.questions("Вот вопросы:\n```json\n{\"questions\":[\"Бюджет?\",\" Сроки? \",\"Что пробовали?\",\"лишний\"]}\n```") == ["Бюджет?", "Сроки?", "Что пробовали?"], "chairman questions from fenced JSON")
+check(Council.questions("не json").isEmpty, "no questions from text")
+let council = Council.result(#"{"debate":[{"who":"Стратег","say":"Рынок мал"}],"scores":[{"who":"Стратег","score":7},{"who":"Финансист","score":"3"},{"who":"Офферщик","score":12.4}],"ruin":"7,5","conditions":["a","b","c","d","e"]}"#)!
+check(council.scores.map(\.score) == [7, 3, 10], "scores parsed and clamped")
+check(council.ruin == 7.5 && council.conditions.count == 4 && council.debate.count == 1, "ruin, conditions, debate")
+check(Council.format(council.average) == "6,7" && Council.verdict(council.average) == "ДЕЛАТЬ С УСЛОВИЯМИ", "average and verdict")
+check(Council.verdict(3) == "НЕ ДЕЛАТЬ" && Council.verdict(8) == "ДЕЛАТЬ", "verdict bounds")
+check(Council.result(#"{"debate":[]}"#) == nil, "no scores, no result")
+check(Council.councilPrompt("кофейня", answers: [(q: "Бюджет?", a: "")]).contains("(не ответил)"), "unanswered question marked")
+check(Council.report(idea: "кофейня", answers: [], result: council).contains("Вердикт 6,7/10"), "report text")
 
 if failures > 0 { print("\(failures) check(s) failed"); exit(1) }
 print("KimiCore: all checks passed")

@@ -18,7 +18,7 @@ jobs:
           for p in $(find . -name '*.part01'); do b="${p%.part01}"; [ -f "$b" ] || cat "$b".part[0-9][0-9] > "$b"; rm "$b".part[0-9][0-9]; done
 
       - name: Core self-test
-        run: swiftc -o /tmp/coretest Kimi/KimiCore.swift Kimi/Agent.swift Tests/main.swift && /tmp/coretest
+        run: swiftc -o /tmp/coretest Kimi/KimiCore.swift Kimi/Agent.swift Kimi/Council.swift Tests/main.swift && /tmp/coretest
 
       - name: Draw Kimy (app icon, Dynamic Island images)
         run: python3 -m pip install --quiet --break-system-packages pillow && python3 tools/kimy.py
