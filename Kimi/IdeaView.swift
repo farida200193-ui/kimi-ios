@@ -28,6 +28,7 @@ struct IdeaView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var report: SharedFile?
+    @FocusState private var field: Int?   // -1 the idea, 0… the answers; while typing the table shrinks so the button stays above the keyboard
 
     private var ember: Color { Self.ember }
 
@@ -40,7 +41,11 @@ struct IdeaView: View {
                     VStack(spacing: 8) {
                         header
                         stageBar
-                        table.frame(height: 340)
+                        table
+                            .scaleEffect(field == nil ? 1 : 0.5, anchor: .top)
+                            .frame(height: field == nil ? 340 : 170, alignment: .top)
+                            .contentShape(Rectangle())
+                            .onTapGesture { field = nil }   // tap the table to hide the keyboard
                         caption
                         panel.id("panel")
                         Color.clear.frame(height: 1).id("end")
@@ -48,6 +53,13 @@ struct IdeaView: View {
                     .padding(.bottom, 20)
                 }
                 .onChange(of: shown) { _ in withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
+                .onChange(of: field) { f in
+                    guard f != nil else { return }
+                    // after the keyboard has slid in
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { withAnimation { proxy.scrollTo("end", anchor: .bottom) } }
+                }
+                .onChange(of: idea) { _ in if field != nil { proxy.scrollTo("end", anchor: .bottom) } }
+                .animation(.easeOut(duration: 0.25), value: field)
             }
         }
         .foregroundColor(Theme.text)
@@ -226,13 +238,13 @@ struct IdeaView: View {
                 if idea.isEmpty {
                     Text("Например: открыть кофейню у дома").foregroundColor(Theme.muted).padding(.top, 8).padding(.leading, 5)
                 }
-                TextEditor(text: $idea).frame(minHeight: 80).accessibilityLabel("Ваша идея")
+                TextEditor(text: $idea).frame(minHeight: 80).focused($field, equals: -1).accessibilityLabel("Ваша идея")
             }
             .font(.system(size: 15))
             .padding(6)
             .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.14)))
-            goButton("Собрать совет", enabled: !idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await gather() } }
+            goButton("Собрать совет", enabled: !idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { field = nil; Task { await gather() } }
         }
     }
 
@@ -255,8 +267,11 @@ struct IdeaView: View {
                     .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.14)))
                     .accessibilityLabel(questions[k])
+                    .focused($field, equals: k)
+                    .submitLabel(k + 1 < questions.count ? .next : .done)
+                    .onSubmit { field = k + 1 < questions.count ? k + 1 : nil }
             }
-            goButton("Начать спор", enabled: true) { Task { await argue() } }
+            goButton("Начать спор", enabled: true) { field = nil; Task { await argue() } }
         }
     }
 
