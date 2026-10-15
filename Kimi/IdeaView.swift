@@ -79,13 +79,12 @@ struct IdeaView: View {
         HStack(spacing: 5) {
             ForEach(Stage.allCases, id: \.self) { s in
                 if s != .idea { Text("·").foregroundColor(Color(white: 0.4)) }
-                Text(s.title)
+                Text(s.title).tracking(0.8)   // View.tracking is iOS 16, Text.tracking works on 15
                     .foregroundColor(s == stage ? ember : s.rawValue < stage.rawValue ? Color(red: 0.73, green: 0.66, blue: 0.63) : Color(white: 0.42))
                     .shadow(color: s == stage ? ember.opacity(0.7) : .clear, radius: 6)
             }
         }
         .font(.system(size: 9.5, weight: .bold, design: .rounded))
-        .tracking(0.8)
         .lineLimit(1).minimumScaleFactor(0.7)
         .padding(.horizontal, 12)
         .accessibilityElement(children: .ignore)
