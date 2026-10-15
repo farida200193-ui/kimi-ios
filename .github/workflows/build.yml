@@ -38,6 +38,9 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/Kimi.app Payload/
+          # unsigned builds carry no entitlements: an ad-hoc signature hands HealthKit to Sideloadly, which re-signs with the owner's Apple ID
+          codesign -f -s - --entitlements Kimi/Kimi.entitlements Payload/Kimi.app
+          codesign -d --entitlements - Payload/Kimi.app | grep -q healthkit
           zip -qry Kimi.ipa Payload
           ls -lh Kimi.ipa
 

@@ -73,6 +73,7 @@ final class Connectors: ObservableObject {
             case "reminders": if !(await allow(.reminder)) { return "Разрешите Kimy доступ к напоминаниям: Настройки → Kimy → Напоминания." }
             case "contacts":
                 if !((try? await CNContactStore().requestAccess(for: .contacts)) ?? false) { return "Разрешите Kimy доступ к контактам: Настройки → Kimy → Контакты." }
+            case "health": if let problem = await Fitness.shared.authorize() { return problem }
             case "office": if Keychain.read(Keychain.office).isEmpty { return "Сначала впишите ключ Офиса в настройках." }
             default: break
             }
@@ -172,6 +173,31 @@ final class Connectors: ObservableObject {
             e.calendar = events.defaultCalendarForNewEvents
             try events.save(e, span: .thisEvent)
             return "Событие создано."
+
+        case "calendar.series":
+            guard let start = Agent.date(x["start"]) else { throw Problem(errorDescription: "Не понял время первой тренировки.") }
+            let e = EKEvent(eventStore: events)
+            e.title = x["title"] ?? "Тренировка"
+            e.notes = x["notes"]
+            e.startDate = start
+            e.endDate = start.addingTimeInterval(Double(Int(x["minutes"] ?? "45") ?? 45) * 60)
+            e.calendar = events.defaultCalendarForNewEvents
+            let weeks = min(max(Int(x["weeks"] ?? "4") ?? 4, 1), 26)
+            let days = Agent.weekdays(x["days"] ?? "").compactMap { EKWeekday(rawValue: $0).map { EKRecurrenceDayOfWeek($0) } }
+            e.addRecurrenceRule(EKRecurrenceRule(recurrenceWith: days.isEmpty ? .daily : .weekly, interval: 1, daysOfTheWeek: days.isEmpty ? nil : days,
+                                                 daysOfTheMonth: nil, monthsOfTheYear: nil, weeksOfTheYear: nil, daysOfTheYear: nil, setPositions: nil,
+                                                 end: EKRecurrenceEnd(end: start.addingTimeInterval(Double(weeks) * 7 * 86400))))
+            e.addAlarm(EKAlarm(relativeOffset: -15 * 60))
+            try events.save(e, span: .futureEvents)
+            return "Тренировки поставлены в календарь на \(weeks) нед., напоминание за 15 минут."
+
+        case "health.steps":
+            return try await Fitness.shared.report(days: Int(x["days"] ?? "7") ?? 7)
+        case "health.summary":
+            return await Fitness.shared.summary()
+        case "steps.goal":
+            guard let n = Int((x["steps"] ?? "").filter(\.isNumber)) else { throw Problem(errorDescription: "Не понял цель по шагам.") }
+            return try await Fitness.shared.setGoal(n)
 
         case "reminders.list":
             let predicate = events.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)

@@ -13,6 +13,10 @@ targets:
     dependencies:
       - target: KimiWidget   # embedded as PlugIns/KimiWidget.appex; iOS 15 ignores it
     scheme: {}
+    entitlements:
+      path: Kimi/Kimi.entitlements
+      properties:
+        com.apple.developer.healthkit: true   # reading the Health app (trainer)
     info:
       path: Kimi/Info.plist
       properties:
@@ -33,13 +37,16 @@ targets:
         NSRemindersUsageDescription: Kimy читает список дел и добавляет напоминания после вашего подтверждения.
         NSRemindersFullAccessUsageDescription: Kimy читает список дел и добавляет напоминания после вашего подтверждения.
         NSContactsUsageDescription: Kimy находит телефон или почту человека, которому вы просите написать.
+        NSMotionUsageDescription: Kimy считает ваши шаги и следит за дневной целью.
+        NSHealthShareUsageDescription: Kimy-тренер учитывает вес, пульс, сон и тренировки из «Здоровья», чтобы составить план.
+        NSHealthUpdateUsageDescription: Kimy не записывает данные в «Здоровье».
         ITSAppUsesNonExemptEncryption: false
         NSSupportsLiveActivities: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi
         MARKETING_VERSION: "0.4"   # the widget's version must match
-        CURRENT_PROJECT_VERSION: "8"
+        CURRENT_PROJECT_VERSION: "9"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -65,7 +72,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: games.kim.kimi.widget
         MARKETING_VERSION: "0.4"
-        CURRENT_PROJECT_VERSION: "8"
+        CURRENT_PROJECT_VERSION: "9"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         CODE_SIGNING_ALLOWED: "NO"

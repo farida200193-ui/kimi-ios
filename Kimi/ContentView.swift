@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showConnectors = false
     @State private var showIdea = false
     @ObservedObject private var connectors = Connectors.shared
+    @ObservedObject private var fitness = Fitness.shared
     @State private var pending = 0
     @State private var attached: [(name: String, text: String)] = []
     @State private var picking = false
@@ -45,12 +46,12 @@ struct ContentView: View {
         .background(EmptyView().sheet(isPresented: $showConnectors) { ConnectorsView() })
         .background(EmptyView().fullScreenCover(isPresented: $showIdea) { IdeaView() })
         .background(EmptyView().sheet(item: $report) { ShareSheet(items: [$0.url]) })
-        .task { await loadPending() }
+        .task { await loadPending(); await refreshSteps() }
         // Kimy stays in the Dynamic Island / on the lock screen after the app is minimised
         .onAppear { Island.shared.refresh(phase) }
         .onChange(of: phase) { Island.shared.show($0) }
         .onChange(of: scenePhase) {
-            if $0 == .active { Island.shared.refresh(phase); Task { await loadPending() } }
+            if $0 == .active { Island.shared.refresh(phase); Task { await loadPending(); await refreshSteps() } }
         }
     }
 
@@ -154,11 +155,39 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
 
+            trainerCard
+
             HStack(spacing: 10) {
                 quick("calendar", "Что у меня завтра?", tint: Theme.blue, fg: Theme.sky) { Task { await ask("Что у меня завтра?", voice: false) } }
                 quick("lightbulb.fill", "Идея · прожарка идеи", tint: IdeaView.ember, fg: IdeaView.ember) { showIdea = true }
             }
         }
+    }
+
+    /// Personal trainer: today's steps against the goal; a tap starts (or continues) the plan in the chat.
+    private var trainerCard: some View {
+        Button { Task { await ask("Будь моим персональным тренером: тренировки, шаги и питание.", voice: false) } } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().stroke(Theme.green.opacity(0.2), lineWidth: 5)
+                    Circle().trim(from: 0, to: fitness.goal > 0 ? min(Double(fitness.today ?? 0) / Double(fitness.goal), 1) : 0)
+                        .stroke(Theme.green, style: StrokeStyle(lineWidth: 5, lineCap: .round)).rotationEffect(.degrees(-90))
+                    Image(systemName: "figure.walk").font(.system(size: 16, weight: .semibold)).foregroundColor(Theme.mint)
+                }
+                .frame(width: 40, height: 40)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Тренер").font(Theme.title(16))
+                    Text(fitness.today.map { n in fitness.goal > 0 ? "Шаги: \(n) из \(fitness.goal)" : "Шаги сегодня: \(n)" } ?? "Тренировки, шаги, питание")
+                        .font(.system(size: 13)).foregroundColor(Theme.soft)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 15, weight: .semibold))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .glass(20, border: Theme.green.opacity(0.35))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(fitness.today.map { "Тренер. Шаги сегодня \($0)" + (fitness.goal > 0 ? " из \(fitness.goal)" : "") } ?? "Тренер")
     }
 
     private func quick(_ icon: String, _ title: String, tint: Color, fg: Color, action: @escaping () -> Void) -> some View {
@@ -318,6 +347,10 @@ struct ContentView: View {
 
     private func approve() async {
         if let answer = await chat.approve(voice: spoken), spoken { voice.say(answer, as: SpeechKit.kimy) }
+    }
+
+    private func refreshSteps() async {
+        if (connectors.access["health"] ?? .off) != .off { await fitness.refresh() }
     }
 
     private func loadPending() async {

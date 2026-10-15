@@ -141,5 +141,13 @@ check(Council.result(#"{"debate":[]}"#) == nil, "no scores, no result")
 check(Council.councilPrompt("кофейня", answers: [(q: "Бюджет?", a: "")]).contains("(не ответил)"), "unanswered question marked")
 check(Council.report(idea: "кофейня", answers: [], result: council).contains("Вердикт 6,7/10"), "report text")
 
+// personal trainer
+check(Agent.weekdays("Пн, ср,ПЯТНИЦА") == [2, 4, 6] && Agent.weekdays("каждый день").isEmpty && Agent.weekdays("сб вс сб") == [1, 7], "weekdays")
+check(Agent.gate(Agent.Action(tool: "health.steps", args: [:]), access: ["health": .read], mcp: [:], mcpAccess: [:]) == .run, "steps read by itself")
+check(Agent.gate(Agent.Action(tool: "steps.goal", args: ["steps": "8000"]), access: ["health": .act], mcp: [:], mcpAccess: [:]) == .ask, "step goal asks first")
+check(Agent.gate(Agent.Action(tool: "calendar.series", args: [:]), access: ["calendar": .act], mcp: [:], mcpAccess: [:]) == .ask, "training series asks first")
+check(Agent.describe(Agent.Action(tool: "calendar.series", args: ["title": "Силовая", "start": "2026-10-16 08:00", "days": "пн,ср,пт", "weeks": "4"])).contains("пн,ср,пт"), "series described")
+check(ctx0.contains("уровень подготовки"), "trainer skill always in the prompt")
+
 if failures > 0 { print("\(failures) check(s) failed"); exit(1) }
 print("KimiCore: all checks passed")

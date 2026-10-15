@@ -27,6 +27,8 @@ enum Agent {
         Connector(id: "calendar", title: "Календарь", icon: "calendar", about: "События iPhone, включая Google и iCloud", tools: [
             Tool(name: "calendar.list", args: #"{"from":"ГГГГ-ММ-ДД","days":1}"#, about: "события за дни", acts: false),
             Tool(name: "calendar.add", args: #"{"title":"…","start":"ГГГГ-ММ-ДД ЧЧ:ММ","minutes":60,"place":"…"}"#, about: "создать событие", acts: true),
+            Tool(name: "calendar.series", args: #"{"title":"…","start":"ГГГГ-ММ-ДД ЧЧ:ММ","minutes":45,"days":"пн,ср,пт","weeks":4,"notes":"…"}"#,
+                 about: "повторяющиеся события с напоминанием за 15 минут (тренировки); days пусто — каждый день", acts: true),
         ]),
         Connector(id: "reminders", title: "Напоминания", icon: "checklist", about: "Список дел iPhone", tools: [
             Tool(name: "reminders.list", args: "{}", about: "невыполненные напоминания", acts: false),
@@ -44,6 +46,11 @@ enum Agent {
         ]),
         Connector(id: "maps", title: "Карты", icon: "map", about: "Маршруты в Картах", tools: [
             Tool(name: "maps.route", args: #"{"to":"адрес или место"}"#, about: "построить маршрут", acts: true),
+        ]),
+        Connector(id: "health", title: "Здоровье и шаги", icon: "heart.fill", about: "Шаги с iPhone, данные приложения «Здоровье», цель по шагам", tools: [
+            Tool(name: "health.steps", args: #"{"days":7}"#, about: "шаги по дням (до 7 дней) и цель", acts: false),
+            Tool(name: "health.summary", args: "{}", about: "вес, рост, пульс покоя, сон, активные калории, тренировки за неделю из «Здоровья»", acts: false),
+            Tool(name: "steps.goal", args: #"{"steps":8000}"#, about: "цель по шагам на день; каждый вечер Kimy напомнит, сколько осталось", acts: true),
         ]),
         Connector(id: "office", title: "Офис", icon: "building.2", about: "Сотрудники-агенты, в том числе Лев (почта) и Вера (продажи)", tools: [
             Tool(name: "office.ask", args: #"{"text":"Имя сотрудника, поручение"}"#, about: "спросить сотрудника офиса, например «Лев, что в почте?»", acts: false),
@@ -68,6 +75,15 @@ enum Agent {
 
     // MARK: prompt
 
+    /// The personal trainer skill: level first, then the plan, then calendar and steps.
+    static let trainer = "Ты ещё и персональный тренер и нутрициолог. Когда владелец просит тренировки, план питания, похудеть или набрать форму: "
+        + "сначала узнай то, чего ещё нет в памяти, — уровень подготовки (новичок, средний, продвинутый), цель, возраст, рост, вес, болезни и травмы, "
+        + "где тренируется и какой инвентарь, сколько дней в неделю и во сколько удобно, что ест и чего не ест. Спрашивай по 2–3 вопроса за раз и запоминай ответы через [[ЗАПОМНИ]]. "
+        + "Если подключено «Здоровье и шаги», посмотри health.summary и health.steps. Потом составь план: тренировки по дням (упражнения, подходы, повторы, отдых), "
+        + "цель по шагам и рацион на день (калории, белки, жиры, углеводы, примеры блюд). Предложи поставить тренировки в календарь через calendar.series и цель через steps.goal. "
+        + "Нагрузку повышай постепенно. Без резких диет: худеть не быстрее 0,5–1 кг в неделю, калорийность не ниже 1500 ккал для мужчин и 1200 для женщин. "
+        + "При болях, хронических болезнях, давлении, беременности сначала посоветуй показаться врачу."
+
     static func context(access: [String: Access], mcp: [String: [RemoteTool]], mcpAccess: [String: Access],
                         memory: [String], now: Date, zone: TimeZone = .current) -> String {
         var lines: [String] = []
@@ -82,6 +98,7 @@ enum Agent {
         }
         lines.append("Если владелец сообщает о себе что-то важное надолго (близкие, предпочтения, здоровье, цели), добавь в конец ответа [[ЗАПОМНИ: факт]]. "
             + "Если просит забыть — [[ЗАБУДЬ: номер]]. Пароли, номера карт и документов не запоминай.")
+        lines.append(trainer)
         var tools: [String] = []
         for c in connectors {
             let level = access[c.id] ?? .off
@@ -200,11 +217,25 @@ enum Agent {
         case "message.send": return "\(appName(x["app"])): \(x["to"].map { "для \($0): " } ?? "")«\(x["text"] ?? "")»"
         case "shortcut.run": return "Запустить команду «\(x["name"] ?? "")»"
         case "maps.route": return "Маршрут до «\(x["to"] ?? "")»"
+        case "calendar.series": return "Тренировки «\(x["title"] ?? "")» с \(x["start"] ?? "") \(x["days"].flatMap { $0.isEmpty ? nil : $0 } ?? "каждый день"), \(x["weeks"] ?? "4") нед."
+        case "health.steps": return "Посмотреть шаги"
+        case "health.summary": return "Посмотреть данные «Здоровья»"
+        case "steps.goal": return "Цель: \(x["steps"] ?? "") шагов в день, напоминание вечером"
         case "office.ask": return "Офис: «\(x["text"] ?? "")»"
         case "office.proposals": return "Посмотреть, что ждёт решения в Офисе"
         case "mcp": return "\(x["server"] ?? "") → \(x["tool"] ?? "") \(x["args"] ?? "")"
         default: return a.tool
         }
+    }
+
+    /// «пн, ср,пт» → EventKit weekdays (Sunday = 1 … Saturday = 7); unknown words are skipped.
+    static func weekdays(_ s: String) -> [Int] {
+        let map = ["вс": 1, "пн": 2, "вт": 3, "ср": 4, "чт": 5, "пт": 6, "сб": 7]
+        var out: [Int] = []
+        for part in s.lowercased().split(whereSeparator: { !$0.isLetter }) {
+            if let d = map[String(part.prefix(2))], !out.contains(d) { out.append(d) }
+        }
+        return out.sorted()
     }
 
     static func appName(_ app: String?) -> String {
