@@ -1,21 +1,9 @@
 import SwiftUI
 
-/// «Идея» — прожарка идеи (approved mockup «Kimy · Прожарка идеи»): seven AI advisors around the fire,
-/// the chairman (Kimy) asks, they argue, score, and give a verdict with a PDF report.
+/// «Прожарка идеи»: seven AI advisors around the fire (approved mockup «Kimy · Прожарка идеи»).
+/// Idea → council → chairman's questions → debate → scores → verdict with a PDF report.
 struct IdeaView: View {
-    enum Stage: Int, CaseIterable {
-        case idea, council, questions, debate, scores, verdict
-        var title: String { ["ИДЕЯ", "СОВЕТ", "ВОПРОСЫ", "СПОР", "ОЦЕНКИ", "ВЕРДИКТ"][rawValue] }
-    }
-
-    static let ember = Color(red: 1, green: 0.478, blue: 0.102)     // #FF7A1A
-    static let flame = Color(red: 1, green: 0.761, blue: 0.294)     // #FFC24B
-    static let red = Color(red: 1, green: 0.302, blue: 0.239)       // #FF4D3D
-    static let seatColors: [Color] = [
-        Color(red: 0.30, green: 0.49, blue: 1), Color(red: 0.18, green: 0.75, blue: 0.44), Color(red: 1, green: 0.48, blue: 0.10),
-        Color(red: 0.55, green: 0.49, blue: 0.96), Color(red: 0.90, green: 0.70, blue: 0.17), Color(red: 1, green: 0.36, blue: 0.54),
-        Color(red: 0.18, green: 0.77, blue: 0.84),
-    ]
+    enum Stage: Int, CaseIterable { case idea, council, questions, debate, scores, verdict }
 
     @Environment(\.dismiss) private var dismiss
     @State private var stage = Stage.idea
@@ -23,26 +11,41 @@ struct IdeaView: View {
     @State private var questions: [String] = []
     @State private var answers: [String] = []
     @State private var result: Council.Result?
-    @State private var shown = 0          // debate lines on screen
+    @State private var shown = 0            // debate lines on screen
+    @State private var talking: Int?        // advisor index
     @State private var seated = false
+    @State private var scored = false
+    @State private var ruinBar: Double = 0
     @State private var busy = false
     @State private var error: String?
     @State private var report: SharedFile?
 
-    private var ember: Color { Self.ember }
+    static let ember = Color(red: 1, green: 0.478, blue: 0.102)       // #FF7A1A
+    static let flame = Color(red: 1, green: 0.761, blue: 0.294)       // #FFC24B
+    static let red = Color(red: 1, green: 0.302, blue: 0.239)
+    static let colors: [Color] = [
+        Color(red: 0.298, green: 0.490, blue: 1), Color(red: 0.184, green: 0.749, blue: 0.443), Color(red: 1, green: 0.478, blue: 0.102),
+        Color(red: 0.545, green: 0.486, blue: 0.965), Color(red: 0.898, green: 0.702, blue: 0.173), Color(red: 1, green: 0.361, blue: 0.541),
+        Color(red: 0.180, green: 0.769, blue: 0.839),
+    ]
+    private let names = ["ИДЕЯ", "СОВЕТ", "ВОПРОСЫ", "СПОР", "ОЦЕНКИ", "ВЕРДИКТ"]
 
     var body: some View {
         ZStack {
             Theme.night.ignoresSafeArea()
-            RadialGradient(colors: [ember.opacity(0.28), .clear], center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: 380).ignoresSafeArea()
+            RadialGradient(colors: [Self.ember.opacity(0.28), .clear], center: UnitPoint(x: 0.5, y: 0.3), startRadius: 0, endRadius: 320).ignoresSafeArea()
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 8) {
                         header
-                        stageBar
-                        table.frame(height: 340)
-                        caption
-                        panel.id("panel")
+                        stages
+                        scene.frame(height: 340)
+                        Text(caption).font(Theme.title(16, .heavy)).multilineTextAlignment(.center)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
+                            .background(Color(red: 0.08, green: 0.055, blue: 0.08).opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+                        panel.padding(14).background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.08)))
+                            .padding(.horizontal, 14)
                         Color.clear.frame(height: 1).id("end")
                     }
                     .padding(.bottom, 20)
@@ -64,371 +67,299 @@ struct IdeaView: View {
                 Image(systemName: "chevron.left").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44)
                     .background(Color.white.opacity(0.05), in: Circle()).overlay(Circle().stroke(Color.white.opacity(0.08)))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Назад")
+            .buttonStyle(.plain).accessibilityLabel("Назад")
             VStack(alignment: .leading, spacing: 2) {
-                Text("Идея").font(Theme.title(20, .heavy))
+                Text("Идея").font(Theme.title(22, .heavy))
                 Text("Прожарка идеи · 7 ИИ-советников").font(.system(size: 12)).foregroundColor(Theme.muted)
             }
             Spacer()
         }
-        .padding(.horizontal, 16).padding(.top, 4)
+        .padding(.horizontal, 16)
     }
 
-    private var stageBar: some View {
+    private var stages: some View {
         HStack(spacing: 5) {
             ForEach(Stage.allCases, id: \.self) { s in
                 if s != .idea { Text("·").foregroundColor(Color(white: 0.4)) }
-                Text(s.title).tracking(0.8)   // View.tracking is iOS 16, Text.tracking works on 15
-                    .foregroundColor(s == stage ? ember : s.rawValue < stage.rawValue ? Color(red: 0.73, green: 0.66, blue: 0.63) : Color(white: 0.42))
-                    .shadow(color: s == stage ? ember.opacity(0.7) : .clear, radius: 6)
+                Text(names[s.rawValue]).foregroundColor(s == stage ? Self.ember : s.rawValue < stage.rawValue ? Color(white: 0.7) : Color(white: 0.4))
+                    .shadow(color: s == stage ? Self.ember.opacity(0.6) : .clear, radius: 6)
             }
         }
-        .font(.system(size: 9.5, weight: .bold, design: .rounded))
-        .lineLimit(1).minimumScaleFactor(0.7)
-        .padding(.horizontal, 12)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Этап: \(stage.title.lowercased())")
+        .font(.system(size: 10, weight: .bold, design: .rounded)).tracking(0.6)
+        .accessibilityElement(children: .ignore).accessibilityLabel("Этап: \(names[stage.rawValue].lowercased())")
+    }
+
+    private var caption: String {
+        switch stage {
+        case .idea: return "Идея на прожарку"
+        case .council: return "7 ИИ-советников за столом"
+        case .questions: return busy ? "председатель думает…" : "председатель уточняет"
+        case .debate: return busy ? "советники готовятся…" : "советники спорят"
+        case .scores: return "каждый ставит оценку"
+        case .verdict: return "на выходе — вердикт"
+        }
     }
 
     // MARK: the table
 
-    private var talking: Int? {
-        guard stage == .debate, shown > 0, let r = result, shown <= r.debate.count else { return nil }
-        return seat(of: r.debate[shown - 1].who)
-    }
-
-    private func seat(of who: String) -> Int? {
-        let w = who.lowercased()
-        return Council.advisors.firstIndex { w.hasPrefix($0.name.lowercased()) || $0.name.lowercased().hasPrefix(w) }
-    }
-
-    private func score(_ i: Int) -> Council.Score? {
-        result?.scores.first { seat(of: $0.who) == i }
-    }
-
-    private var table: some View {
+    private var scene: some View {
         GeometryReader { g in
-            let w = g.size.width, cx = w / 2, cy: CGFloat = 190
+            let w = g.size.width, cx = w / 2, cy: CGFloat = 184
             let rx = min(158, w / 2 - 38), ry: CGFloat = 104
             ZStack {
-                ring(340, 200, 0.25, dashed: true).position(x: cx, y: cy)
-                ring(300, 170, 1, dashed: false).position(x: cx, y: cy)
-                ring(220, 116, 0.5, dashed: false).position(x: cx, y: cy)
-                Fire().frame(width: 90, height: 90).position(x: cx, y: cy - 34)
+                ring(340, 200, 0.25).position(x: cx, y: cy + 6)
+                ring(300, 170, 1).position(x: cx, y: cy + 6)
+                ring(220, 116, 0.5).position(x: cx, y: cy + 6)
+                Fire().frame(width: 90, height: 90).position(x: cx, y: cy - 6)
                 Text("ТВОЯ ИДЕЯ").font(.system(size: 10, weight: .heavy, design: .rounded)).tracking(0.6)
                     .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(Color(red: 0.10, green: 0.07, blue: 0.09), in: RoundedRectangle(cornerRadius: 8))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(ember))
-                    .shadow(color: ember.opacity(0.6), radius: 8)
-                    .position(x: cx, y: cy + 8)
-                ForEach(0..<Council.advisors.count, id: \.self) { i in
-                    let angle = -Double.pi / 2 + Double(i) * 2 * .pi / Double(Council.advisors.count)
+                    .background(Color(red: 0.1, green: 0.07, blue: 0.094), in: RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Self.ember))
+                    .shadow(color: Self.ember.opacity(0.5), radius: 8)
+                    .position(x: cx, y: cy + 20)
+                ForEach(Array(Council.advisors.enumerated()), id: \.offset) { i, a in
+                    let angle = -Double.pi / 2 + Double(i) * 2 * .pi / 7
                     let depth = (sin(angle) + 1) / 2
-                    let size = 38 + CGFloat(depth) * 16
-                    seatView(i, size: size)
-                        .position(x: cx + rx * CGFloat(cos(angle)), y: cy + ry * CGFloat(sin(angle)) + 34 - (size * 1.1 + 34) / 2)
-                        .zIndex(depth * 10)
+                    seat(i, a, size: 38 + depth * 16)
+                        .position(x: cx + rx * cos(angle), y: cy + ry * sin(angle) + 4)
+                        .zIndex(depth)
                         .opacity(seated ? 1 : 0)
                         .scaleEffect(seated ? 1 : 0.6)
-                        .animation(.spring(response: 0.5, dampingFraction: 0.7).delay(Double(i) * 0.12), value: seated)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.7).delay(Double(i) * 0.12), value: seated)
                 }
             }
         }
     }
 
-    private func ring(_ w: CGFloat, _ h: CGFloat, _ opacity: Double, dashed: Bool) -> some View {
-        Ellipse()
-            .stroke(ember, style: StrokeStyle(lineWidth: dashed ? 1 : 2, dash: dashed ? [5, 4] : []))
-            .frame(width: w, height: h)
-            .shadow(color: ember.opacity(0.7), radius: 10)
-            .opacity(opacity)
+    private func ring(_ w: CGFloat, _ h: CGFloat, _ opacity: Double) -> some View {
+        Ellipse().stroke(Self.ember, lineWidth: opacity == 1 ? 2 : 1).frame(width: w, height: h)
+            .shadow(color: Self.ember.opacity(0.6), radius: 10).opacity(opacity)
     }
 
-    private func seatView(_ i: Int, size: CGFloat) -> some View {
-        let a = Council.advisors[i], on = talking == i, s = score(i)
-        let showScore = stage.rawValue >= Stage.scores.rawValue && s != nil
+    private func score(of i: Int) -> Int? {
+        let name = Council.advisors[i].name.lowercased()
+        return result?.scores.first { $0.who.lowercased().contains(name) }?.score
+    }
+
+    private func seat(_ i: Int, _ a: Council.Advisor, size: CGFloat) -> some View {
+        let on = talking == i
         return VStack(spacing: 0) {
-            HStack(alignment: .lastTextBaseline, spacing: 1) {
-                Text("\(s?.score ?? 0)").font(.system(size: 20, weight: .heavy, design: .rounded)).monospacedDigit()
-                Text("/10").font(.system(size: 9)).foregroundColor(Theme.muted)
+            if scored, let s = score(of: i) {
+                (Text("\(s)").font(Theme.title(20, .heavy)) + Text("/10").font(.system(size: 9)).foregroundColor(Theme.muted))
+                    .foregroundColor(s <= 3 ? Self.red : Theme.text)
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Color(red: 0.063, green: 0.047, blue: 0.07), in: RoundedRectangle(cornerRadius: 7))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(s <= 3 ? Self.red : Self.ember.opacity(0.3)))
+                    .transition(.scale)
+                    .padding(.bottom, 2)
             }
-            .foregroundColor((s?.score ?? 10) <= 3 ? Self.red : Theme.text)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(Color(red: 0.06, green: 0.05, blue: 0.07), in: RoundedRectangle(cornerRadius: 7))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke((s?.score ?? 10) <= 3 ? Self.red : ember.opacity(0.35)))
-            .scaleEffect(showScore ? 1 : 0.01)
-            .opacity(showScore ? 1 : 0)
-            .animation(.spring(response: 0.35, dampingFraction: 0.55).delay(Double(i) * 0.18), value: showScore)
-            .padding(.bottom, 2)
-            GhostBadge(color: Self.seatColors[i], size: size)
-                .shadow(color: ember.opacity(on ? 0.95 : 0.4), radius: on ? 14 : 7)
-            Text(a.name.uppercased()).font(.system(size: 8.5, weight: .heavy, design: .rounded)).tracking(0.3)
-                .foregroundColor(on ? Color(red: 0.09, green: 0.04, blue: 0.02) : Theme.text)
+            GhostBadge(color: Self.colors[i], size: size)
+                .shadow(color: Self.ember.opacity(on ? 1 : 0.35), radius: on ? 14 : 7)
+            Text(a.name.uppercased()).font(.system(size: 8.5, weight: .heavy, design: .rounded))
+                .foregroundColor(on ? Color(red: 0.086, green: 0.043, blue: 0.02) : Theme.text)
                 .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(on ? ember : Color(red: 0.06, green: 0.05, blue: 0.07), in: RoundedRectangle(cornerRadius: 5))
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(ember.opacity(0.35)))
-                .padding(.top, -4)
-                .animation(.easeOut(duration: 0.25), value: on)
-            Text(a.focus).font(.system(size: 9)).foregroundColor(Theme.muted)
+                .background(on ? Self.ember : Color(red: 0.063, green: 0.047, blue: 0.07), in: RoundedRectangle(cornerRadius: 5))
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Self.ember.opacity(on ? 1 : 0.3)))
+                .offset(y: -4)
+            Text(a.focus).font(.system(size: 9)).foregroundColor(Theme.muted).offset(y: -3)
         }
         .fixedSize()
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(a.name), \(a.focus)" + (showScore ? ", оценка \(s!.score) из 10" : ""))
+        .animation(.easeOut(duration: 0.25), value: on)
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: caption and panel
+    // MARK: the panel
 
-    private var caption: some View {
-        let parts: (String, String, String) = {
-            switch stage {
-            case .idea: return ("Идея на ", "прожарку", "")
-            case .council: return ("", "7", " ИИ-советников за столом")
-            case .questions: return ("председатель ", "уточняет", "")
-            case .debate: return ("советники ", "спорят", "")
-            case .scores: return ("каждый ставит ", "оценку", "")
-            case .verdict: return ("на выходе — ", "вердикт", "")
-            }
-        }()
-        return (Text(parts.0) + Text(parts.1).foregroundColor(ember) + Text(parts.2))
-            .font(.system(size: 15, weight: .heavy, design: .rounded))
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 14).padding(.vertical, 7)
-            .background(Color(red: 0.08, green: 0.05, blue: 0.08).opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.06)))
-    }
-
-    private var panel: some View {
+    @ViewBuilder private var panel: some View {
         VStack(alignment: .leading, spacing: 10) {
             switch stage {
-            case .idea: ideaPanel
-            case .council: chairman("Председатель Kimy думает над вопросами…", working: true)
-            case .questions: questionsPanel
-            case .debate: debatePanel
-            case .scores: scoresPanel
-            case .verdict: verdictPanel
-            }
-            if let error = error {
-                Text(error).font(.footnote).foregroundColor(Self.red)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(Color.white.opacity(0.08)))
-        .padding(.horizontal, 14)
-    }
-
-    private var ideaPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Ваша идея").font(.system(size: 14, weight: .bold))
-            ZStack(alignment: .topLeading) {
-                if idea.isEmpty {
-                    Text("Например: открыть кофейню у дома").foregroundColor(Theme.muted).padding(.top, 8).padding(.leading, 5)
+            case .idea:
+                Text("Ваша идея").font(.system(size: 14, weight: .bold))
+                ZStack(alignment: .topLeading) {
+                    if idea.isEmpty { Text("Например: открыть кофейню у дома").foregroundColor(Theme.muted).padding(.top, 8).padding(.leading, 5) }
+                    TextEditor(text: $idea).frame(minHeight: 80).accessibilityLabel("Идея")
                 }
-                TextEditor(text: $idea).frame(minHeight: 80).accessibilityLabel("Ваша идея")
-            }
-            .font(.system(size: 15))
-            .padding(6)
-            .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.14)))
-            goButton("Собрать совет", enabled: !idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await gather() } }
-        }
-    }
-
-    private func chairman(_ text: String, working: Bool = false) -> some View {
-        HStack(spacing: 10) {
-            GhostBadge(color: Theme.blue, size: 28)
-            Text(text).font(.system(size: 14, weight: .bold))
-            if working { ProgressView().tint(ember) }
-        }
-    }
-
-    private var questionsPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            chairman("Прежде чем совет начнёт — несколько вопросов:")
-            ForEach(questions.indices, id: \.self) { k in
-                Text(questions[k]).font(.system(size: 14, weight: .bold))
-                TextField("", text: $answers[k], prompt: Text("Ваш ответ").foregroundColor(Theme.muted))
-                    .font(.system(size: 15))
-                    .padding(.horizontal, 12).frame(minHeight: 44)
-                    .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.14)))
-                    .accessibilityLabel(questions[k])
-            }
-            goButton("Начать спор", enabled: true) { Task { await argue() } }
-        }
-    }
-
-    private var debatePanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let r = result {
-                ForEach(0..<min(shown, r.debate.count), id: \.self) { k in
-                    let line = r.debate[k], i = seat(of: line.who)
+                .padding(4).background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
+                go("Собрать совет", disabled: idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await askQuestions() } }
+            case .council, .questions:
+                HStack(spacing: 10) {
+                    GhostBadge(size: 28)
+                    Text(busy || questions.isEmpty ? "Председатель Kimy думает над вопросами…" : "Прежде чем совет начнёт — три вопроса:")
+                        .font(.system(size: 14, weight: .bold))
+                    if busy { ProgressView().tint(Self.ember) }
+                }
+                ForEach(questions.indices, id: \.self) { k in
+                    Text(questions[k]).font(.system(size: 14, weight: .semibold))
+                    TextField("", text: $answers[k], prompt: Text("Ответ (можно пропустить)").foregroundColor(Theme.muted))
+                        .padding(.horizontal, 12).frame(height: 44)
+                        .background(Color.black.opacity(0.3), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.14)))
+                }
+                if !questions.isEmpty { go("Начать спор", disabled: busy) { Task { await runCouncil() } } }
+            case .debate:
+                if busy {
+                    HStack { ProgressView().tint(Self.ember); Text("Советники спорят — это займёт до минуты…").font(.system(size: 14)) }
+                }
+                ForEach(Array((result?.debate ?? []).prefix(shown).enumerated()), id: \.offset) { _, line in
                     HStack(alignment: .top, spacing: 8) {
-                        Circle().fill(i.map { Self.seatColors[$0] } ?? Theme.muted).frame(width: 10, height: 10).padding(.top, 4)
+                        Circle().fill(color(of: line.who)).frame(width: 10, height: 10).padding(.top, 4)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(line.who.uppercased()).font(.system(size: 10, weight: .heavy, design: .rounded)).foregroundColor(Self.flame)
-                            Text(line.say).font(.system(size: 14)).fixedSize(horizontal: false, vertical: true)
+                            Text(line.say).font(.system(size: 14))
                         }
                     }
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
-                goButton("К оценкам", enabled: shown >= r.debate.count) { withAnimation { stage = .scores } }
-            } else {
-                chairman("Совет спорит… это займёт до минуты", working: true)
-            }
-        }
-    }
-
-    private func scoreList(withWhy: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(result?.scores ?? [], id: \.who) { s in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(s.who.uppercased()).font(.system(size: 11, weight: .bold, design: .rounded)).frame(width: 112, alignment: .leading).lineLimit(1).minimumScaleFactor(0.8)
-                    Text("\(s.score)").font(.system(size: 13, weight: .heavy, design: .rounded)).monospacedDigit()
-                        .foregroundColor(s.score <= 3 ? Self.red : Theme.text).frame(width: 22, alignment: .leading)
-                    if withWhy { Text(s.why).font(.system(size: 13)).foregroundColor(Theme.muted).fixedSize(horizontal: false, vertical: true) }
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-
-    private var scoresPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let r = result {
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(Council.format(r.ruin)).font(.system(size: 30, weight: .heavy, design: .rounded)).monospacedDigit()
-                        Text("из 10").font(.system(size: 11)).foregroundColor(Theme.muted)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        GeometryReader { g in
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(Color.white.opacity(0.08))
-                                Capsule().fill(LinearGradient(colors: [Self.flame, ember, Self.red], startPoint: .leading, endPoint: .trailing))
-                                    .frame(width: g.size.width * r.ruin / 10)
-                            }
+                if let r = result { go("К оценкам", disabled: shown < r.debate.count) { toScores() } }
+            case .scores:
+                if let r = result {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(Council.format(r.ruin)).font(Theme.title(30, .heavy))
+                            Text("из 10").font(.system(size: 11)).foregroundColor(Theme.muted)
                         }
-                        .frame(height: 10)
-                        Text("риск разорения").font(.system(size: 11)).foregroundColor(Theme.muted)
+                        VStack(alignment: .leading, spacing: 4) {
+                            GeometryReader { g in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.white.opacity(0.08))
+                                    Capsule().fill(LinearGradient(colors: [Self.flame, Self.ember, Self.red], startPoint: .leading, endPoint: .trailing))
+                                        .frame(width: g.size.width * ruinBar / 10)
+                                }
+                            }
+                            .frame(height: 10)
+                            Text("риск разорения").font(.system(size: 11)).foregroundColor(Theme.muted)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    scoreList(r, why: true)
+                    go("Вердикт") { withAnimation { stage = .verdict } }
+                }
+            case .verdict:
+                if let r = result {
+                    VStack(spacing: 6) {
+                        Text("ВЕРДИКТ \(Council.format(r.average))/10").font(Theme.title(18, .heavy))
+                        Text(Council.verdict(r.average)).font(Theme.title(16, .heavy)).foregroundColor(Self.ember).multilineTextAlignment(.center)
+                    }
+                    .padding(.vertical, 16).padding(.horizontal, 20).frame(maxWidth: .infinity)
+                    .background(Color(red: 0.082, green: 0.05, blue: 0.063), in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Self.ember, lineWidth: 2))
+                    .shadow(color: Self.ember.opacity(0.55), radius: 18)
+                    .transition(.scale)
+                    scoreList(r, why: false)
+                    if !r.conditions.isEmpty {
+                        Text("Условия").font(.system(size: 14, weight: .bold))
+                        ForEach(r.conditions, id: \.self) { Text("• \($0)").font(.system(size: 13)) }
+                    }
+                    HStack(spacing: 8) {
+                        go("Отчёт в PDF") {
+                            let answered = zip(questions, answers).map { (q: $0.0, a: $0.1) }
+                            if let url = Files.report(Council.report(idea: idea, answers: answered, result: r)) { report = SharedFile(url: url) }
+                        }
+                        Button("Новая идея") { restart() }
+                            .font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity, minHeight: 48)
+                            .overlay(Capsule().stroke(Color.white.opacity(0.18))).buttonStyle(.plain)
                     }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Риск разорения \(Council.format(r.ruin)) из 10")
-                scoreList(withWhy: true)
-                goButton("Вердикт", enabled: true) { withAnimation(.spring()) { stage = .verdict } }
+            }
+            if let error = error {
+                Text(error).font(.footnote).foregroundColor(Color(red: 1, green: 0.54, blue: 0.5))
             }
         }
     }
 
-    private var verdictPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let r = result {
-                VStack(spacing: 6) {
-                    Text("ВЕРДИКТ \(Council.format(r.average))/10").font(.system(size: 18, weight: .heavy, design: .rounded))
-                    Text(Council.verdict(r.average)).font(.system(size: 16, weight: .heavy, design: .rounded)).foregroundColor(ember)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, 20).padding(.vertical, 16)
-                .background(Color(red: 0.08, green: 0.05, blue: 0.06), in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(ember, lineWidth: 2))
-                .shadow(color: ember.opacity(0.6), radius: 18)
-                .frame(maxWidth: .infinity)
-                .transition(.scale.combined(with: .opacity))
-                scoreList(withWhy: false)
-                if !r.conditions.isEmpty {
-                    Text("Условия").font(.system(size: 14, weight: .bold))
-                    ForEach(r.conditions, id: \.self) { Text("• \($0)").font(.system(size: 13)).fixedSize(horizontal: false, vertical: true) }
-                }
-                HStack(spacing: 8) {
-                    goButton("Отчёт в PDF", enabled: true) {
-                        let text = Council.report(idea: idea, answers: Array(zip(questions, answers)).map { (q: $0.0, a: $0.1) }, result: r)
-                        if let url = Files.report(text) { report = SharedFile(url: url) } else { error = "Не удалось сохранить PDF." }
-                    }
-                    Button { restart() } label: {
-                        Text("Новая идея").font(.system(size: 15, weight: .bold)).frame(maxWidth: .infinity, minHeight: 48)
-                            .overlay(Capsule().stroke(Color.white.opacity(0.18)))
-                    }
-                    .buttonStyle(.plain)
+    private func scoreList(_ r: Council.Result, why: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(r.scores.enumerated()), id: \.offset) { _, s in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(s.who.uppercased()).font(.system(size: 11, weight: .heavy, design: .rounded)).frame(width: 112, alignment: .leading).lineLimit(1).minimumScaleFactor(0.8)
+                    Text("\(s.score)").font(Theme.title(13, .heavy)).foregroundColor(s.score <= 3 ? Self.red : Theme.text).frame(width: 24, alignment: .leading)
+                    if why { Text(s.why).font(.system(size: 13)).foregroundColor(Theme.muted) }
                 }
             }
         }
     }
 
-    private func goButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    private func go(_ title: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(.system(size: 15, weight: .heavy)).foregroundColor(Color(red: 0.10, green: 0.05, blue: 0.02))
+            Text(title).font(.system(size: 15, weight: .heavy)).foregroundColor(Color(red: 0.1, green: 0.05, blue: 0.016))
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(ember, in: Capsule())
-                .shadow(color: ember.opacity(enabled ? 0.6 : 0), radius: 12)
+                .background(Self.ember, in: Capsule())
+                .shadow(color: Self.ember.opacity(disabled ? 0 : 0.5), radius: 12)
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled || busy)
-        .opacity(enabled && !busy ? 1 : 0.45)
+        .buttonStyle(.plain).disabled(disabled).opacity(disabled ? 0.45 : 1)
     }
 
-    // MARK: the flow
+    private func color(of who: String) -> Color {
+        let i = Council.advisors.firstIndex { who.lowercased().contains($0.name.lowercased()) }
+        return i.map { Self.colors[$0] } ?? Self.ember
+    }
+
+    // MARK: flow
 
     private func ask(_ prompt: String) async throws -> String {
         try await askKimi(history: [ChatMessage(role: .user, text: prompt)], voice: false)
     }
 
-    private func gather() async {
+    private func askQuestions() async {
         error = nil
+        withAnimation { stage = .council }
+        seated = true
         busy = true
         defer { busy = false }
-        withAnimation { stage = .council; seated = true }
         do {
-            let found = Council.questions(try await ask(Council.questionsPrompt(idea)))
-            questions = found.isEmpty ? ["Какой бюджет?", "Когда хотите запустить?", "Что уже пробовали?"] : found
+            let qs = Council.questions(try await ask(Council.questionsPrompt(idea)))
+            questions = qs.isEmpty ? ["Какой бюджет?", "Какие сроки?", "Что уже пробовали?"] : qs
             answers = Array(repeating: "", count: questions.count)
             withAnimation { stage = .questions }
         } catch {
             self.error = error.localizedDescription
-            withAnimation { stage = .idea; seated = false }
         }
     }
 
-    private func argue() async {
+    private func runCouncil() async {
         error = nil
-        busy = true
-        result = nil
-        shown = 0
         withAnimation { stage = .debate }
+        busy = true
+        let answered = zip(questions, answers).map { (q: $0.0, a: $0.1) }
         do {
-            let qa = Array(zip(questions, answers)).map { (q: $0.0, a: $0.1.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            guard let r = Council.result(try await ask(Council.councilPrompt(idea, answers: qa))) else {
-                throw Files.Problem(errorDescription: "Совет ответил непонятно. Попробуйте ещё раз.")
+            guard let r = Council.result(try await ask(Council.councilPrompt(idea, answers: answered))) else {
+                busy = false
+                error = "Совет ответил непонятно. Нажмите «Начать спор» ещё раз."
+                stage = .questions
+                return
             }
             result = r
             busy = false
-            for k in 0..<r.debate.count {
-                withAnimation(.easeOut(duration: 0.35)) { shown = k + 1 }
+            for (k, line) in r.debate.enumerated() {
+                talking = Council.advisors.firstIndex { line.who.lowercased().contains($0.name.lowercased()) }
+                withAnimation(.easeOut(duration: 0.3)) { shown = k + 1 }
                 try? await Task.sleep(nanoseconds: 1_600_000_000)
+                if stage != .debate { return }
             }
+            talking = nil
         } catch {
             busy = false
             self.error = error.localizedDescription
-            withAnimation { stage = .questions }
+            stage = .questions
         }
+    }
+
+    private func toScores() {
+        talking = nil
+        withAnimation { stage = .scores }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) { scored = true }
+        withAnimation(.easeOut(duration: 1.2)) { ruinBar = result?.ruin ?? 0 }
     }
 
     private func restart() {
         withAnimation {
-            stage = .idea
-            seated = false
-            result = nil
-            questions = []
-            answers = []
-            shown = 0
-            idea = ""
+            stage = .idea; idea = ""; questions = []; answers = []; result = nil
+            shown = 0; talking = nil; seated = false; scored = false; ruinBar = 0; error = nil
         }
     }
 }
 
-/// The fire in the middle of the table: three flickering flames.
+/// The fire in the middle of the table: three flickering tongues.
 private struct Fire: View {
     @Environment(\.accessibilityReduceMotion) private var still
     var body: some View {
@@ -437,24 +368,18 @@ private struct Fire: View {
             ZStack(alignment: .bottom) {
                 Circle().fill(RadialGradient(colors: [IdeaView.ember.opacity(0.55), .clear], center: .center, startRadius: 0, endRadius: 50))
                     .frame(width: 110, height: 110).offset(y: 20)
-                flame(t, speed: 7.0, phase: 0, width: 34, height: 66, x: 0)
-                flame(t, speed: 8.5, phase: 1.3, width: 26, height: 48, x: -16)
-                flame(t, speed: 6.1, phase: 2.1, width: 26, height: 52, x: 16)
+                ForEach(0..<3) { i in
+                    let k = sin(t * (5.5 + Double(i) * 1.7) + Double(i))
+                    Ellipse()
+                        .fill(RadialGradient(colors: [Color(red: 1, green: 0.95, blue: 0.77), IdeaView.flame, IdeaView.ember, IdeaView.ember.opacity(0)],
+                                             center: UnitPoint(x: 0.5, y: 0.8), startRadius: 0, endRadius: 40))
+                        .frame(width: 34, height: i == 0 ? 66 : i == 1 ? 48 : 52)
+                        .scaleEffect(x: 1 - 0.06 * k, y: 1 + 0.1 * k, anchor: .bottom)
+                        .offset(x: CGFloat(i == 0 ? 0 : i == 1 ? -18 : 18))
+                        .blur(radius: 1.5)
+                }
             }
-            .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .accessibilityHidden(true)
-    }
-
-    private func flame(_ t: Double, speed: Double, phase: Double, width: CGFloat, height: CGFloat, x: CGFloat) -> some View {
-        let k = sin(t * speed + phase)
-        return Ellipse()
-            .fill(LinearGradient(colors: [Color(red: 1, green: 0.95, blue: 0.77), IdeaView.flame, IdeaView.ember, IdeaView.ember.opacity(0)],
-                                 startPoint: .bottom, endPoint: .top))
-            .frame(width: width, height: height)
-            .scaleEffect(x: 1 - 0.07 * CGFloat(k), y: 1 + 0.1 * CGFloat(k), anchor: .bottom)
-            .rotationEffect(.degrees(3 * k), anchor: .bottom)
-            .blur(radius: 1.5)
-            .offset(x: x)
     }
 }
