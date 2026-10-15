@@ -230,7 +230,8 @@ enum Agent {
 
     /// «пн, ср,пт» → EventKit weekdays (Sunday = 1 … Saturday = 7); unknown words are skipped.
     static func weekdays(_ s: String) -> [Int] {
-        let map = ["вс": 1, "пн": 2, "вт": 3, "ср": 4, "чт": 5, "пт": 6, "сб": 7]
+        // short forms and the first two letters of full names («пятница» → «пя»)
+        let map = ["вс": 1, "во": 1, "пн": 2, "по": 2, "вт": 3, "ср": 4, "чт": 5, "че": 5, "пт": 6, "пя": 6, "сб": 7, "су": 7]
         var out: [Int] = []
         for part in s.lowercased().split(whereSeparator: { !$0.isLetter }) {
             if let d = map[String(part.prefix(2))], !out.contains(d) { out.append(d) }
