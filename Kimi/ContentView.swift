@@ -6,7 +6,8 @@ struct ContentView: View {
     @StateObject private var chat = ChatModel()
     @StateObject private var voice = Voice()
     @State private var draft = ""
-    @State private var showSettings = Keychain.read().isEmpty
+    @State private var showSettings = false
+    @State private var showWelcome = isNewUser
     @State private var showOffice = false
     @State private var showConnectors = false
     @State private var showIdea = false
@@ -42,6 +43,9 @@ struct ContentView: View {
         .foregroundColor(Theme.text)
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .background(EmptyView().fullScreenCover(isPresented: $showWelcome) {
+            WelcomeView { showWelcome = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { showSettings = true } }
+        })
         .background(EmptyView().sheet(isPresented: $showOffice, onDismiss: { Task { await loadPending() } }) { OfficeView(voice: voice) })
         .background(EmptyView().sheet(isPresented: $showConnectors) { ConnectorsView() })
         .background(EmptyView().fullScreenCover(isPresented: $showIdea) { IdeaView() })
@@ -125,7 +129,8 @@ struct ContentView: View {
                         .frame(width: 40, height: 40).background(Theme.violet, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Офис").font(Theme.title(16))
-                        Text(pending > 0 ? "16 сотрудников · \(pending) ждёт решения" : "16 сотрудников").font(.system(size: 13)).foregroundColor(Theme.soft)
+                        Text(Keychain.read(Keychain.office).isEmpty ? (pending > 0 ? "Ваш ИИ-офис · \(pending) ждёт решения" : "Ваш ИИ-офис: команда под ваш бизнес")
+                             : (pending > 0 ? "16 сотрудников · \(pending) ждёт решения" : "16 сотрудников")).font(.system(size: 13)).foregroundColor(Theme.soft)
                     }
                     Spacer()
                     if pending > 0 { counter(pending) }
@@ -470,14 +475,23 @@ struct SettingsView: View {
                 Section("Как к вам обращаться") {
                     TextField("Имя", text: $name)
                 }
+                if !Keychain.read(Keychain.account).isEmpty {
+                    Section {
+                        NavigationLink(destination: OfficeSetupView()) { Text("Мой офис: настройка") }
+                    } header: {
+                        Text("Аккаунт Kimy")
+                    } footer: {
+                        Text("Kimy думает на сервере Kimy. Здесь вы собираете свой ИИ-офис: о бизнесе, группа в Telegram, почта, кодовое слово.")
+                    }
+                }
                 Section {
                     SecureField("Ключ AI Gateway (sk-…)", text: $key)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                 } header: {
-                    Text("Ключ")
+                    Text("Свой ключ нейросети (необязательно)")
                 } footer: {
-                    Text("Хранится в защищённой Связке ключей этого iPhone и отправляется только в AI Gateway Timeweb.")
+                    Text("Только если хотите платить за нейросеть сами: тогда Kimy ходит в AI Gateway Timeweb напрямую. Хранится в Связке ключей.")
                 }
                 Section {
                     SecureField("Ключ входа в Офис", text: $officeKey)
@@ -486,7 +500,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Офис")
                 } footer: {
-                    Text("Тот же ключ, что в веб-версии Kimy (файл kimi-office.token на сервере). Хранится в Связке ключей.")
+                    Text("Только для владельца сервера Kimy: ключ его собственного офиса (kimi-office.token). Пользователям не нужен.")
                 }
                 Section {
                     SecureField("API-ключ Yandex SpeechKit", text: $speechKey)

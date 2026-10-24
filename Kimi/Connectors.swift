@@ -43,7 +43,7 @@ final class Connectors: ObservableObject {
 
     /// The Office is the owner's own server: with its key in place Kimy may ask it, unless the owner switched it off.
     func officeKeyChanged() {
-        let hasKey = !Keychain.read(Keychain.office).isEmpty
+        let hasKey = !Keychain.read(Keychain.office).isEmpty || !Keychain.read(Keychain.account).isEmpty
         if hasKey && access["office"] == nil { access["office"] = .read }
         if !hasKey && access["office"] != nil { access["office"] = nil }
         store(access, "access")
@@ -74,7 +74,7 @@ final class Connectors: ObservableObject {
             case "contacts":
                 if !((try? await CNContactStore().requestAccess(for: .contacts)) ?? false) { return "Разрешите Kimy доступ к контактам: Настройки → Kimy → Контакты." }
             case "health": if let problem = await Fitness.shared.authorize() { return problem }
-            case "office": if Keychain.read(Keychain.office).isEmpty { return "Сначала впишите ключ Офиса в настройках." }
+            case "office": if Keychain.read(Keychain.office).isEmpty && Keychain.read(Keychain.account).isEmpty { return "Сначала создайте аккаунт Kimy и настройте офис." }
             default: break
             }
         }

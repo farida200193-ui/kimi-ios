@@ -14,7 +14,19 @@ struct OfficeView: View {
 
     struct Member { let name: String; let role: String; let image: String }
     // shortcut: the team is listed in the app, change it here when the office changes (the server has no team endpoint yet)
-    private let team: [Member] = [
+    /// The universal team of a Kimy user's office (team_template.json on the server).
+    private let usersTeam: [Member] = [
+        Member(name: "Артём", role: "директор", image: "agent-ceo"), Member(name: "Николь", role: "бизнес-ассистент", image: "agent-assistant"),
+        Member(name: "Глеб", role: "маркетолог", image: "agent-marketer"), Member(name: "Вера", role: "качество продаж", image: "agent-sales"),
+        Member(name: "Алла", role: "бухгалтер", image: "agent-accountant"), Member(name: "Олег", role: "финансист", image: "agent-finance"),
+        Member(name: "Тео", role: "юрист", image: "agent-lawyer"), Member(name: "Лев", role: "отчёты и почта", image: "agent-reports"),
+        Member(name: "Макс", role: "фитнес-тренер", image: "agent-fitness"), Member(name: "Ева", role: "здоровье", image: "agent-health"),
+    ]
+    private var owner: Bool { !Keychain.read(Keychain.office).isEmpty }
+    private var team: [Member] { owner ? ownerTeam : usersTeam }
+    @State private var showSetup = false
+
+    private let ownerTeam: [Member] = [
         Member(name: "Майкл", role: "директор", image: "agent-ceo"), Member(name: "Эрин", role: "бизнес-ассистент", image: "agent-assistant"),
         Member(name: "Джим", role: "маркетолог", image: "agent-marketer"), Member(name: "Пэм", role: "продюсер YouTube", image: "agent-youtube"),
         Member(name: "Филлис", role: "главный редактор", image: "agent-blogger"), Member(name: "Келли", role: "дизайнер", image: "agent-designer"),
@@ -31,6 +43,22 @@ struct OfficeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header
+                    if !owner {
+                        Button { showSetup = true } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "slider.horizontal.3").font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
+                                    .frame(width: 34, height: 34).background(Theme.violet, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Настроить офис под себя").font(.system(size: 14, weight: .bold))
+                                    Text("О бизнесе, группа в Telegram, почта, кодовое слово").font(.system(size: 12)).foregroundColor(Theme.muted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }
+                            .padding(12).glass(20)
+                        }
+                        .buttonStyle(.plain)
+                    }
                     ForEach(proposals) { decisionCard($0) }
                     taskCard
                     if !replies.isEmpty { repliesCard }
@@ -50,6 +78,7 @@ struct OfficeView: View {
         .preferredColorScheme(.dark)
         .task { await load() }
         .onAppear { UITextView.appearance().backgroundColor = .clear }   // TextEditor sits on glass
+        .sheet(isPresented: $showSetup, onDismiss: { Task { await load() } }) { NavigationView { OfficeSetupView() }.preferredColorScheme(.dark) }
     }
 
     private var header: some View {
@@ -114,7 +143,7 @@ struct OfficeView: View {
             Text("Поручение").font(.system(size: 14, weight: .bold))
             ZStack(alignment: .topLeading) {
                 if task.isEmpty {
-                    Text("Например: «Лев, что в почте?»").foregroundColor(Theme.muted).padding(.top, 8).padding(.leading, 5)
+                    Text(owner ? "Например: «Лев, что в почте?»" : "Например: «Артём, составь план на неделю»").foregroundColor(Theme.muted).padding(.top, 8).padding(.leading, 5)
                 }
                 TextEditor(text: $task).frame(minHeight: 70).accessibilityLabel("Поручение офису")
             }

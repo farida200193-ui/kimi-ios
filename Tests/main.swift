@@ -153,5 +153,19 @@ check(ctx0.contains("уровень подготовки"), "trainer skill alway
 check(KimiCore.endsConversation("Стоп!") && KimiCore.endsConversation(" хватит ") && !KimiCore.endsConversation("стоп-кран это что"), "stop words")
 check(KimiCore.yesNo("Да.") == true && KimiCore.yesNo("Не надо") == false && KimiCore.yesNo("да, но в пятницу") == nil, "spoken approval")
 
+// Kimy account: brain and office on the server
+let signupReq = try! Account.signup(name: "Анна", company: "Пекарня", invite: "")
+check(signupReq.url?.absoluteString == "https://ai.edu-upgrade.ru/kimy/signup" && signupReq.value(forHTTPHeaderField: "Authorization") == nil, "signup needs no key")
+let brainReq = try! KimiCore.request(key: "kt_1", model: "m", history: [], voice: false, endpoint: Account.chat)
+check(brainReq.url?.absoluteString == "https://ai.edu-upgrade.ru/kimy/chat" && brainReq.value(forHTTPHeaderField: "Authorization") == "Bearer kt_1", "brain on the server")
+Office.tenant = true
+check((try! Office.ask("x", token: "kt_1")).url?.absoluteString == "https://ai.edu-upgrade.ru/kimy/office/ask", "own office through the account")
+Office.tenant = false
+check((try! Office.ask("x", token: "t")).url?.absoluteString == "https://ai.edu-upgrade.ru/office/ask", "owner office unchanged")
+let st = Account.status(["company": "Пекарня", "office": "работает", "steps": ["business": true, "telegram_bot": true, "telegram_group": false],
+                         "telegram": ["bot": "pekarnya_bot", "code": "KIMY-123456"], "chat_today": 3, "chat_limit": 200])
+check(st.running && st.business && st.telegramBot && !st.telegramGroup && st.code == "KIMY-123456" && st.chatLimit == 200, "account status")
+check(SpeechKit.voice(for: "Артём · директор").name == "alexander", "voices of the users' team")
+
 if failures > 0 { print("\(failures) check(s) failed"); exit(1) }
 print("KimiCore: all checks passed")

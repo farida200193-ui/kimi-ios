@@ -46,7 +46,7 @@ enum KimiCore {
 
         var errorDescription: String? {
             switch self {
-            case .noKey: return "Укажите ключ AI Gateway в настройках."
+            case .noKey: return "Создайте аккаунт Kimy или впишите свой ключ AI Gateway в настройках."
             case .emptyReply: return "Сервис вернул пустой ответ."
             case let .service(code, text): return "Сервис ответил \(code): \(text)"
             }
@@ -106,7 +106,7 @@ enum KimiCore {
         let t = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         return t == "офис" || ["открой офис", "открыть офис", "покажи офис", "зайди в офис", "открой мой офис"].contains(t)
     }
-    static func request(key: String, model: String, history: [ChatMessage], voice: Bool, context: String = "") throws -> URLRequest {
+    static func request(key: String, model: String, history: [ChatMessage], voice: Bool, context: String = "", endpoint: URL = endpoint) throws -> URLRequest {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { throw Failure.noKey }
         var request = URLRequest(url: endpoint, timeoutInterval: 120)
@@ -119,8 +119,49 @@ enum KimiCore {
 }
 
 /// The owner's AI office on the server (kimi_api.py behind https://ai.edu-upgrade.ru/office/). Foundation only: tested in Tests/main.swift.
+/// A Kimy account on the owner's server (kimy_tenants.py behind https://ai.edu-upgrade.ru/kimy/):
+/// the brain runs there on the service's key, and every user sets up an office of their own.
+enum Account {
+    static let base = URL(string: "https://ai.edu-upgrade.ru/kimy")!
+    static var chat: URL { base.appendingPathComponent("chat") }
+
+    static func request(_ path: String, token: String, body: [String: Any]? = nil) throws -> URLRequest {
+        var r = URLRequest(url: base.appendingPathComponent(path), timeoutInterval: 60)
+        let token = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !token.isEmpty { r.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let body = body {
+            r.httpMethod = "POST"
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        return r
+    }
+
+    static func signup(name: String, company: String, invite: String) throws -> URLRequest {
+        try request("signup", token: "", body: ["owner_name": name, "company": company, "invite": invite])
+    }
+
+    struct Status: Equatable {
+        var company = "", office = "", bot = "", code = "", group = "", mail = ""
+        var business = false, telegramBot = false, telegramGroup = false
+        var chatToday = 0, chatLimit = 0
+        var running: Bool { office == "работает" }
+    }
+
+    static func status(_ root: [String: Any]) -> Status {
+        let steps = root["steps"] as? [String: Any] ?? [:], tg = root["telegram"] as? [String: Any] ?? [:]
+        return Status(company: root["company"] as? String ?? "", office: root["office"] as? String ?? "",
+                      bot: tg["bot"] as? String ?? "", code: tg["code"] as? String ?? "", group: tg["group"] as? String ?? "",
+                      mail: root["mail"] as? String ?? "", business: steps["business"] as? Bool ?? false,
+                      telegramBot: steps["telegram_bot"] as? Bool ?? false, telegramGroup: steps["telegram_group"] as? Bool ?? false,
+                      chatToday: root["chat_today"] as? Int ?? 0, chatLimit: root["chat_limit"] as? Int ?? 0)
+    }
+}
+
 enum Office {
-    static let base = URL(string: "https://ai.edu-upgrade.ru/office")!
+    /// Users of the Kimy service reach their own office through the account; the owner's office has its own entry.
+    static var tenant = false
+    static var base: URL { tenant ? Account.base.appendingPathComponent("office") : URL(string: "https://ai.edu-upgrade.ru/office")! }
 
     struct Reply: Equatable { let who: String; let text: String }
     struct Proposal: Equatable, Identifiable { let id: Int; let text: String }
@@ -204,6 +245,10 @@ enum SpeechKit {
         "Райан": Voice(name: "filipp", role: nil, speed: 1.15), "Программист": Voice(name: "madi_ru", role: nil, speed: 1.0),
         "Вера": Voice(name: "jane", role: "neutral", speed: 1.0), "Лев": Voice(name: "ermil", role: "good", speed: 0.95),
         "Макс": Voice(name: "kirill", role: "good", speed: 1.15), "Ева": Voice(name: "omazh", role: "neutral", speed: 0.95),
+        // the universal team of Kimy users
+        "Артём": Voice(name: "alexander", role: "good", speed: 1.15), "Николь": Voice(name: "lera", role: "friendly", speed: 1.1),
+        "Глеб": Voice(name: "anton", role: "good", speed: 1.0), "Алла": Voice(name: "julia", role: "strict", speed: 0.9),
+        "Олег": Voice(name: "ermil", role: "neutral", speed: 1.0), "Тео": Voice(name: "zahar", role: "neutral", speed: 0.85),
     ]
 
     /// "Майкл · директор" → Майкл's voice; anyone unknown speaks as Kimy.
